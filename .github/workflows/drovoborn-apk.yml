@@ -3,6 +3,8 @@ on:
   push:
     paths: ['drovoborn/**', '.github/workflows/drovoborn-apk.yml']
   workflow_dispatch:
+permissions:
+  contents: write
 jobs:
   apk:
     runs-on: ubuntu-latest
@@ -17,3 +19,11 @@ jobs:
         with:
           name: Drovoborn-apk
           path: drovoborn/Drovoborn.apk
+      - name: Commit APK to the branch
+        if: github.ref_type == 'branch'
+        run: |
+          mkdir -p drovoborn/dist && cp drovoborn/Drovoborn.apk drovoborn/dist/Drovoborn.apk
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f drovoborn/dist/Drovoborn.apk
+          git diff --cached --quiet || (git commit -m "Build Drovoborn.apk" && git push)
