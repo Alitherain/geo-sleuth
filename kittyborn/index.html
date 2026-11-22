@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#1d1640">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Dark KittyBorn</title>
+</head>
+<body>
+<div id="game"></div>
+<div id="joyBase" hidden><div id="joyKnob"></div></div>
+
+<div class="hud" id="hudL">
+  <div class="pill" id="coins"><span class="coin"></span><span id="coinN">0</span></div>
+  <div class="pill small">🎒 <span id="bagN">0/10</span></div>
+  <div id="hearts" hidden></div>
+</div>
+<div class="hud" id="hudR">
+  <button class="btn" id="bFull" aria-label="На весь екран">⛶</button>
+  <button class="btn" id="bSnd" aria-label="Звук">🔊</button>
+  <button class="btn" id="bMenu" aria-label="Меню">☰</button>
+</div>
+<div id="hint" class="off"></div>
+<div id="toast"><b></b><span></span></div>
+<div id="card"></div>
+<div id="bossbar" hidden><div class="n">Пан Пухнастий, Жах Блідого Місяця</div><div class="b"><div class="f" id="bossF"></div></div></div>
+<div class="band" id="dead"><b>ВИ ПРИЛЯГЛИ</b><span>Рюкзак розсипався. Ліхтар чекає на площі.</span></div>
+<div class="band gold" id="win"><b>ЗДОБИЧ ВПОЛЮВАНО</b><span>Пан Пухнастий тепер просто Пухнастий.</span></div>
+
+<div id="menu" hidden>
+  <div class="mcard">
+    <h2>Пауза</h2>
+    <div class="st" id="stats"></div>
+    <div class="mrow"><button class="ubtn" id="mResume">Грати далі</button><button class="ubtn" id="mMusic">Музика: так</button></div>
+    <h3>Перенести збереження</h3>
+    <textarea id="mCode" rows="3" placeholder="Тут з'явиться код збереження, або встав сюди свій код"></textarea>
+    <div class="mrow"><button class="ubtn" id="mExport">Отримати код</button><button class="ubtn" id="mImport">Завантажити з коду</button></div>
+    <div class="st" id="mStatus" aria-live="polite"></div>
+    <div class="mrow"><button class="ubtn ghost" id="mReset">Почати спочатку</button></div>
+  </div>
+</div>
+
+<div id="title">
+  <div class="tin">
+    <h1>Dark <em>KittyBorn</em></h1>
+    <p>Кошеня-Ліхтарник, Профспілка Котів і Пухнасті Ночі під блідим місяцем.</p>
+    <button class="big" id="bStart">Почати полювання</button>
+    <div class="tag">Гра про дрова, котиків і ліхтарі. Як у рекламі, але насправді.</div>
+  </div>
+</div>
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>

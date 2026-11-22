@@ -1,0 +1,37 @@
+name: Dark KittyBorn build
+on:
+  push:
+    paths: ['kittyborn/**', '!kittyborn/release/**', '.github/workflows/kittyborn.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: kittyborn } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: npm, cache-dependency-path: kittyborn/package-lock.json }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '21' }
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: npm run build:single
+      - run: npx cap sync android
+      - run: cd android && ./gradlew --no-daemon assembleDebug
+      - name: Collect release files
+        run: |
+          mkdir -p release
+          cp android/app/build/outputs/apk/debug/app-debug.apk release/DarkKittyBorn.apk
+          cp dist-single/index.html release/DarkKittyBorn-offline.html
+      - uses: actions/upload-artifact@v4
+        with: { name: DarkKittyBorn, path: kittyborn/release/ }
+      - name: Commit release files to the branch
+        if: github.ref_type == 'branch'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f release/DarkKittyBorn.apk release/DarkKittyBorn-offline.html
+          git diff --cached --quiet || (git commit -m "Build Dark KittyBorn release files" && git pull --rebase origin "$GITHUB_REF_NAME" && git push)

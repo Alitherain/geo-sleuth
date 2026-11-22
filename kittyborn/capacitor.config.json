@@ -1,0 +1,6 @@
+{
+  "appId": "ua.kittyborn.game",
+  "appName": "Dark KittyBorn",
+  "webDir": "dist",
+  "android": { "backgroundColor": "#1d1640" }
+}
