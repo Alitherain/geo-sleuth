@@ -553,7 +553,7 @@ function hitTree(t, by) {
   if (t.hp <= 0) fellTree(t, by);
 }
 function fellTree(t, by) {
-  t.alive = false; t.regrow = t.zone === 'deep' ? 16 : 11; t.claimed = null;
+  t.alive = false; t.regrow = t.zone === 'deep' ? 22 : 40; t.claimed = null;
   S.felled++;
   effects.push({ type: 'fall', x: t.x, y: t.y, kind: t.kind, s: t.s, dir: by.x < t.x ? 1 : -1, t: 0 });
   if (by === P) { sfx('fall'); shake = Math.max(shake, 3); }
@@ -831,7 +831,9 @@ function updateCat(c, dt) {
   } else if (c.role === 'haul') {
     if (c.state === 'seek') {
       const src = (S.smoke.out > 0 && built('smoke')) ? 'smoke' : (S.saw.out > 0 && built('saw')) ? 'saw' : null;
-      if (c.stack.length >= cap + 3 || (c.stack.length > 0 && !src)) c.state = 'deliver';
+      // batch trips: go sell only when full, or after waiting a while with nothing new to pick up
+      if (src || !c.stack.length) c.waitT = 0; else c.waitT = (c.waitT || 0) + dt;
+      if (c.stack.length >= cap + 3 || c.waitT > 4) { c.state = 'deliver'; c.waitT = 0; }
       else if (src) {
         const st = src === 'saw' ? STATIONS[3] : STATIONS[5];
         if (moveToward(c, st.x, st.y, spd, dt) || dist(c.x, c.y, st.x, st.y) < 20) {
@@ -860,10 +862,11 @@ function updateCat(c, dt) {
         if (boss && boss.state !== 'drop' && boss.state !== 'dead') tg = boss;
         else for (const b of beasts) { if (b.spawn > 0) continue; const d = dist(c.x, c.y, b.x, b.y); if (d < bd) { bd = d; tg = b; } }
         if (tg) {
+          c.waitT = 0;
           const d = dist(c.x, c.y, tg.x, tg.y);
           if (d > tg.r + 26) moveToward(c, tg.x, tg.y, spd * 1.1, dt);
           else { c.moving = false; c.face = tg.x > c.x ? 1 : -1; if (c.swingT <= 0) { if (tg === boss) hurtBoss(1.5 + S.up.cat * .5); else hurtBeast(tg, 1.5 + S.up.cat * .5, c); c.swing = 1; c.swingT = .7; } }
-        } else if (c.stack.length) c.state = 'deliver';
+        } else if (c.stack.length && (c.waitT = (c.waitT || 0) + dt) > 5) { c.state = 'deliver'; c.waitT = 0; }
         else { c.idleT -= dt; if (c.idleT <= 0) { c.wx = rand(1800, 2000); c.wy = rand(780, 920); c.idleT = 3; } moveToward(c, c.wx, c.wy, spd * .5, dt); }
       }
     } else {
