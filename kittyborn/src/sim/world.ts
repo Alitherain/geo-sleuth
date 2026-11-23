@@ -126,7 +126,7 @@ export function makeBuilding(w: World, type: BuildingType, x: number, y: number,
   const hp = def.levels?.[0].stats.hp ?? def.hp ?? 100;
   const id = extra.id || type + '_' + w.nextId++;
   const b: Building = { id, type, x, y, level: 1, spec: null, hp, maxHp: hp, store: {}, input: {}, reserved: {}, incoming: {}, t: 0, frac: 0, builtAt: w.time, status: '', fireT: 0, site: null, fuel: def.fuel ? def.fuel.cap * 0.6 : 0, ...extra };
-  if (def.role === 'gatherer' && !b.gather) b.gather = 'wood';
+  if (def.role === 'gatherer') b.gather = def.gather || b.gather || 'wood';
   if (type === 'barracks') { b.queue = b.queue || []; b.trainT = 0; }
   if (type === 'post') b.want = b.want || { spear: 2, sling: 0 };
   w.buildings[id] = b;

@@ -14,7 +14,7 @@ const costLine = (c: Cost) => (Object.entries(c) as [string, number][]).filter((
 const TUT: { text: string; done: (w: World) => boolean }[] = [
   { text: 'Підійди до дерева: сокира рубає сама', done: w => w.stats.felled > 0 },
   { text: 'Продай дрова Пані Сові на жовтому майданчику', done: w => w.stats.earned >= 6 },
-  { text: 'Натисни 🔨 і постав Будиночок збирачів', done: w => has(w, 'houseGatherer') },
+  { text: 'Натисни 🔨 → Котики і постав Хатку лісорубів', done: w => has(w, 'houseGatherer') },
   { text: 'Постав Лісопилку: дошки потрібні для всього', done: w => has(w, 'sawmill') },
   { text: 'Постав Костер: світло обпікає нічних звірів', done: w => has(w, 'bonfire') },
   { text: 'Огороди містечко частоколом перед першою ніччю', done: w => count(w, 'palisade') >= 3 },
@@ -183,6 +183,9 @@ export class Hud {
       el.append(this.h('p', 'sub', 'Будується'));
       const rows = this.h('div', 'rows');
       for (const [k, n] of Object.entries(b.site) as [ItemId, number][]) rows.append(this.row(`${ITEMS[k].icon} ${ITEMS[k].name}`, `ще ${n}${invGet(b.incoming, k) ? ` (везуть ${invGet(b.incoming, k)})` : ''}`, false));
+      const needHouse = ([['stone', 'houseQuarry'], ['berry', 'houseForager'], ['lav', 'houseGatherer']] as const).find(([k, t]) => b.site![k as ItemId] && !has(w, t) && !(k === 'lav' && !w.flags.hedge));
+      if (needHouse) el.append(this.h('p', 'tip warn', `Ніхто не збирає ${ITEMS[needHouse[0] as ItemId].name.toLowerCase()}: постав «${BUILD[needHouse[1]].name}» (🔨 → Котики) або збери сам.`));
+      if (b.site.lav && !w.flags.hedge) el.append(this.h('p', 'tip warn', 'Лавандова деревина росте за хащами: розчисти їх у картці Ратуші.'));
       el.append(rows, this.h('p', 'tip', has(w, 'houseHauler') ? 'Носії привезуть матеріали зі складу. Або принеси сам і стань поруч.' : 'Принеси матеріали в рюкзаку і стань поруч із будовою.'));
     } else {
       el.append(this.h('p', 'tip', def.desc));
@@ -216,22 +219,12 @@ export class Hud {
       for (const k of Object.keys(ITEMS) as ItemId[]) if (invGet(b.store, k)) rows.append(this.row(`${ITEMS[k].icon} ${ITEMS[k].name}`, String(invGet(b.store, k))));
       el.append(rows, this.h('p', 'sub', 'Котики зараз'));
       const list = this.h('div', 'rows');
-      for (const c of w.cats) list.append(this.row(c.role === 'gatherer' ? '🐱 Збирач' : c.role === 'hauler' ? '🐈 Носій' : '🛠️ Майстер', this.catDoing(c), !c.idle));
+      for (const c of w.cats) list.append(this.row(c.role === 'gatherer' ? BUILD[w.buildings[c.home]?.type ?? 'houseGatherer'].icon + ' Збирач' : c.role === 'hauler' ? '🐈 Носій' : '🛠️ Майстер', this.catDoing(c), !c.idle));
       el.append(list); return;
     }
     if (def.role) {
       for (const c of w.cats.filter(c => c.home === b.id)) rows.append(this.row('Котик', this.catDoing(c), !c.idle));
       el.append(rows);
-      if (def.role === 'gatherer') {
-        el.append(this.h('p', 'sub', 'Що збирати'));
-        const r = this.h('div', 'seg');
-        for (const [k, label] of [['wood', '🪵 Дерево'], ['stone', '🪨 Камінь'], ['berry', '🫐 Ягоди']] as const) {
-          const bt = this.h('button', 'segb' + (b.gather === k ? ' on' : ''), label) as HTMLButtonElement;
-          bt.onclick = () => { b.gather = k; for (const c of w.cats.filter(c => c.home === b.id)) { c.task = null; } this.cardSig = ''; this.renderCard(true); sfx('pick'); };
-          r.append(bt);
-        }
-        el.append(r);
-      }
       return;
     }
     if (b.type === 'hall') {

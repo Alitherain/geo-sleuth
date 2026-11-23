@@ -236,6 +236,8 @@ export function buildArt(scene: Phaser.Scene) {
   // hooded cats
   const hoods: Record<string, Hood> = {
     gatherer: { cloak: '#5f8f5a', eye: '#ffd36a', trim: '#e8c08a' },
+    miner: { cloak: '#7a7692', eye: '#ffb84a', trim: '#c9c5d8' },
+    forager: { cloak: '#b0506a', eye: '#c6f56b', trim: '#ffd1e3' },
     hauler: { cloak: '#5b7aa8', eye: '#9ff0d2', trim: '#d6c39a' },
     master: { cloak: '#8a5f42', eye: '#ffcf4a', trim: '#c7465a' },
     spear: { cloak: '#9c3f4f', eye: '#ff8a8a', trim: '#ffcf4a' },
@@ -320,6 +322,8 @@ export function buildArt(scene: Phaser.Scene) {
     for (let i = 0; i < n; i++) { const x0 = -66 + i * wd; c.beginPath(); c.moveTo(x0, -110); c.lineTo(x0 + wd, -110); c.lineTo(x0 + wd, -88); c.quadraticCurveTo(x0 + wd / 2, -80, x0, -88); c.closePath(); paint(c, i % 2 ? '#fff0d6' : '#8a4fae'); }
   });
   make(scene, 'bd_house_gatherer', 80, 90, 36, 82, c => { shadow(c, 4, 2, 34, 9); house(c, { w: 48, h: 30, d: 12, roofH: 26, wall: '#e8c49a', roof: '#5f8f5a', planks: true, door: true }); poly(c, [-20, -50, -16, -66, -9, -54], '#5f8f5a'); poly(c, [16, -54, 22, -68, 26, -54], '#4f7f4a'); });
+  make(scene, 'bd_house_quarry', 80, 90, 36, 82, c => { shadow(c, 4, 2, 34, 9); house(c, { w: 50, h: 30, d: 12, roofH: 24, wall: '#a9a4bc', roof: '#6f6b88', stone: true, door: true }); poly(c, [-20, -48, -16, -64, -9, -52], '#6f6b88'); poly(c, [16, -52, 22, -66, 26, -52], '#5f5b78'); for (const [x, y, r] of [[30, -4, 6], [36, 0, 4]]) poly(c, [x - r, y + 2, x - r * 0.6, y - r, x + r * 0.7, y - r * 0.8, x + r, y + 2], '#8e8aa6'); });
+  make(scene, 'bd_house_forager', 80, 90, 36, 82, c => { shadow(c, 4, 2, 34, 9); house(c, { w: 48, h: 30, d: 12, roofH: 26, wall: '#f2dcc0', roof: '#b0506a', planks: true, door: true }); poly(c, [-20, -50, -16, -66, -9, -54], '#b0506a'); poly(c, [16, -54, 22, -68, 26, -54], '#a0405a'); rr(c, 24, -12, 14, 10, 3, '#c99a5c'); for (const [x, y] of [[28, -13], [33, -14], [30, -16]]) circ(c, x, y, 2.2, '#5b6ee0', false); });
   make(scene, 'bd_house_hauler', 80, 90, 36, 82, c => { shadow(c, 4, 2, 34, 9); house(c, { w: 48, h: 30, d: 12, roofH: 26, wall: '#d6d2e6', roof: '#5b7aa8', planks: true, door: true }); poly(c, [-20, -50, -16, -66, -9, -54], '#5b7aa8'); poly(c, [16, -54, 22, -68, 26, -54], '#4b6a98'); });
   make(scene, 'bd_house_master', 80, 90, 36, 82, c => { shadow(c, 4, 2, 34, 9); house(c, { w: 50, h: 32, d: 12, roofH: 26, wall: '#c9a27a', roof: '#8a5f42', stone: true, door: true, chimney: true }); });
   make(scene, 'bd_sawmill', 150, 140, 70, 124, c => {

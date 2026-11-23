@@ -36,7 +36,7 @@ export const SPAWNS: Record<string, { x: number; y: number; name: string }> = {
 // ---------------------------------------------------------------- buildings
 export type BuildingType =
   | 'hall' | 'shop' | 'heart' | 'bonfire' | 'lantern' | 'ledLamp'
-  | 'houseGatherer' | 'houseHauler' | 'houseMaster'
+  | 'houseGatherer' | 'houseQuarry' | 'houseForager' | 'houseHauler' | 'houseMaster'
   | 'sawmill' | 'storage' | 'forge' | 'candleShop' | 'bell'
   | 'palisade' | 'tower' | 'barracks' | 'post'
   | 'flowerbed' | 'bench' | 'banner' | 'fountain';
@@ -54,7 +54,7 @@ export interface BuildDef {
   hp?: number; levels?: LevelDef[];
   specs?: { id: string; name: string; desc: string; cost: Cost; stats: Record<string, number> }[];
   slots?: { kind: SlotKind; dx: number; dy: number }[];
-  role?: CatRole; comfort?: number;
+  role?: CatRole; gather?: GatherKind; comfort?: number;
   fuel?: { item: ItemId; cap: number; burn: number; radius: number }; // burn = seconds per unit (day)
   proc?: { input: ItemId; output: ItemId; time: number; inCap: number; outCap: number };
   noBuild?: boolean; locked?: string; continuous?: boolean;
@@ -75,7 +75,11 @@ export const BUILD: Record<BuildingType, BuildDef> = {
   lantern: { name: 'Ліхтар на свічках', icon: '🏮', desc: 'Світить ширше й довше за костер, але їсть свічки.', cat: 'light', r: 12, cost: { coins: 30, plank: 4, stone: 2 }, req: [{ b: 'candleShop' }], max: [0, 6, 12], zone: 'near', hp: 70,
     fuel: { item: 'candle', cap: 6, burn: 50, radius: 245 }, slots: [{ kind: 'fuel', dx: 0, dy: 36 }] },
   ledLamp: { name: 'LED-ліхтар', icon: '💡', desc: 'Світло без вогню.', cat: 'light', r: 12, cost: {}, req: [{ hall: 3 }], zone: 'near', locked: 'Наступна глава: Електрика' },
-  houseGatherer: { name: 'Будиночок збирачів', icon: '🐱', desc: 'Котики рубають, видобувають камінь або збирають ягоди — як накажеш.', cat: 'cats', r: 24, cost: { coins: 15 }, req: [], max: [2, 4, 6], zone: 'town', role: 'gatherer',
+  houseGatherer: { name: 'Хатка лісорубів', icon: '🪓', desc: 'Котики-лісоруби рубають дерева: колоди для лісопилки й кострів.', cat: 'cats', r: 24, cost: { coins: 15 }, req: [], max: [2, 4, 6], zone: 'town', role: 'gatherer', gather: 'wood',
+    levels: [{ cost: {}, stats: { cats: 1 }, label: '1 котик' }, { cost: { coins: 80, plank: 8 }, stats: { cats: 2 }, label: '2 котики' }, { cost: { coins: 180, plank: 10, stone: 8 }, stats: { cats: 3 }, label: '3 котики' }] },
+  houseQuarry: { name: 'Каменярня', icon: '⛏️', desc: 'Котики-каменярі видобувають камінь на пагорбах: для башт, мурів і Ратуші.', cat: 'cats', r: 24, cost: { coins: 25, plank: 4 }, req: [{ b: 'sawmill' }], max: [1, 2, 3], zone: 'town', role: 'gatherer', gather: 'stone',
+    levels: [{ cost: {}, stats: { cats: 1 }, label: '1 котик' }, { cost: { coins: 80, plank: 8 }, stats: { cats: 2 }, label: '2 котики' }, { cost: { coins: 180, plank: 10, stone: 8 }, stats: { cats: 3 }, label: '3 котики' }] },
+  houseForager: { name: 'Ягідна хатка', icon: '🧺', desc: 'Котики-ягідники збирають ягоди на галявині: їжа для воїнів і квітники.', cat: 'cats', r: 24, cost: { coins: 15 }, req: [], max: [1, 2, 3], zone: 'town', role: 'gatherer', gather: 'berry',
     levels: [{ cost: {}, stats: { cats: 1 }, label: '1 котик' }, { cost: { coins: 80, plank: 8 }, stats: { cats: 2 }, label: '2 котики' }, { cost: { coins: 180, plank: 10, stone: 8 }, stats: { cats: 3 }, label: '3 котики' }] },
   houseHauler: { name: 'Будиночок носіїв', icon: '🐈', desc: 'Носії возять між будівлями, підкидають дрова в костри, продають надлишок.', cat: 'cats', r: 24, cost: { coins: 50 }, req: [{ b: 'storage' }], max: [1, 2, 3], zone: 'town', role: 'hauler',
     levels: [{ cost: {}, stats: { cats: 1 }, label: '1 котик' }, { cost: { coins: 90, plank: 8 }, stats: { cats: 2 }, label: '2 котики' }, { cost: { coins: 200, plank: 10, stone: 8 }, stats: { cats: 3 }, label: '3 котики' }] },

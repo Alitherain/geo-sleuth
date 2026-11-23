@@ -72,7 +72,7 @@ describe('logistics', () => {
     for (const b of Object.values(w.buildings)) for (const v of [...Object.values(b.reserved), ...Object.values(b.incoming)]) expect(v).toBeGreaterThanOrEqual(0);
   });
   it('gatherers follow the resource set on their house', () => {
-    const w = createWorld(); const h = done(w, 'houseGatherer', TC.x - 120, TC.y - 160, { gather: 'stone' });
+    const w = createWorld(); const h = done(w, 'houseQuarry', TC.x - 120, TC.y - 160);
     run(w, 60);
     const cat = w.cats.find(c => c.home === h.id)!;
     expect(cat.stack.includes('stone') || w.coins > 10 || Object.values(w.buildings).some(b => invGet(b.store, 'stone') > 0)).toBe(true);

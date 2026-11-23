@@ -253,7 +253,8 @@ export class WorldScene extends Phaser.Scene {
     // cats
     for (const c of w.cats) {
       let v = this.cats.get(c.id);
-      if (!v) { v = this.makeChar('cat_' + c.role, false); v.bubble = this.mkText(0, 0, '', 12, INK, 'bubble').setDepth(8000); this.cats.set(c.id, v); }
+      const ht = w.buildings[c.home]?.type;
+      if (!v) { v = this.makeChar('cat_' + (ht === 'houseQuarry' ? 'miner' : ht === 'houseForager' ? 'forager' : c.role), false); v.bubble = this.mkText(0, 0, '', 12, INK, 'bubble').setDepth(8000); this.cats.set(c.id, v); }
       v.root.setVisible(!c.hidden);
       const home = w.buildings[c.home];
       const tool = c.role === 'gatherer' ? (home?.gather === 'stone' ? 'w_pick' : home?.gather === 'berry' ? 'w_basket' : 'w_catAxe') : c.role === 'master' ? 'w_hammer' : '';
@@ -310,7 +311,7 @@ export class WorldScene extends Phaser.Scene {
     if (b.site) return 'site';
     switch (b.type) {
       case 'hall': return 'bd_hall' + b.level;
-      case 'houseGatherer': return 'bd_house_gatherer'; case 'houseHauler': return 'bd_house_hauler'; case 'houseMaster': return 'bd_house_master';
+      case 'houseGatherer': return 'bd_house_gatherer'; case 'houseQuarry': return 'bd_house_quarry'; case 'houseForager': return 'bd_house_forager'; case 'houseHauler': return 'bd_house_hauler'; case 'houseMaster': return 'bd_house_master';
       case 'lantern': return lightRadius(b) > 0 ? 'bd_lantern' : 'bd_lantern_off';
       case 'bonfire': return lightRadius(b) > 0 ? 'bd_bonfire' : 'bd_ash';
       case 'palisade': return b.hp <= 0 ? 'bd_palx' : b.level > 1 ? 'bd_pal2' : 'bd_pal';
