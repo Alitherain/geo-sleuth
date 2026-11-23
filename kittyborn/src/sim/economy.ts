@@ -1,13 +1,12 @@
-import { BUILDINGS, HERO_UPG, ITEMS, type Cost, type ItemId, type PadDef } from '../content/data';
-import { available, costItems, invAdd, invGet, levelStats, makeBuilding, type Building, type PadState, type World } from './world';
+import { BUILD, HERO_UPG, ITEMS, PROJECTS, TC, UNITS, W, H, type BuildingType, type Cost, type ItemId, type UnitKind } from '../content/data';
+import { allOf, available, costItems, count, dist, firstOf, hallLevel, invAdd, invGet, levelStats, makeBuilding, procStats, reqMet, townR, type Building, type World } from './world';
 import { syncCats } from './logistics';
 
-export const storage = (w: World): Building | undefined => w.buildings['storage'];
+export const storage = (w: World): Building | undefined => firstOf(w, 'storage');
 
-/** How many of an item the player can spend right now: carried + free in storage. */
+/** Carried + free in all storages. */
 export function haveItem(w: World, k: ItemId): number {
-  const s = storage(w);
-  return w.hero.stack.filter(i => i === k).length + (s ? available(s, k) : 0);
+  return w.hero.stack.filter(i => i === k).length + allOf(w, 'storage').reduce((a, s) => a + available(s, k), 0);
 }
 export function canAfford(w: World, c: Cost): boolean {
   if ((c.coins || 0) > w.coins) return false;
@@ -16,112 +15,169 @@ export function canAfford(w: World, c: Cost): boolean {
 export function spend(w: World, c: Cost): boolean {
   if (!canAfford(w, c)) return false;
   w.coins -= c.coins || 0;
-  const s = storage(w);
   for (const [k, n] of costItems(c)) {
     let left = n;
-    if (s) { const take = Math.min(left, available(s, k)); invAdd(s.store, k, -take); left -= take; }
+    for (const s of allOf(w, 'storage')) { const take = Math.min(left, available(s, k)); invAdd(s.store, k, -take); left -= take; }
     for (let i = w.hero.stack.length - 1; i >= 0 && left > 0; i--) if (w.hero.stack[i] === k) { w.hero.stack.splice(i, 1); left--; }
   }
   return true;
 }
-
 export function sell(w: World, k: ItemId, n: number, x: number, y: number) {
   const v = ITEMS[k].price * n;
   w.coins += v; w.stats.earned += v;
   w.events.push({ t: 'coin', x, y, v });
-  if (Math.random() < 0.02) w.events.push({ t: 'bubble', who: 'owl', s: ['Ху-ху! Дякую!', 'Ще, ще!', 'Чудовий товар!', 'Ху-у, багатієш!'][Math.floor(Math.random() * 4)] });
+  if (Math.random() < 0.02) w.events.push({ t: 'bubble', who: 'owl', s: ['Ху-ху. Прийнято.', 'Ще, ще.', 'Добрий товар.', 'Запишу в книгу.'][Math.floor(Math.random() * 4)] });
 }
 
-// ---------------------------------------------------------------- production
+// ---------------------------------------------------------------- production and fuel
 export function production(w: World, dt: number) {
-  const b = w.buildings['sawmill'];
-  if (!b) return;
-  const st = levelStats(b);
-  const outN = invGet(b.store, 'plank');
-  if (invGet(b.input, 'log') < 1) { b.status = 'Чекаю колоди'; b.t = 0; return; }
-  if (outN >= st.outCap) { b.status = 'Вихід повний: заберіть дошки'; b.t = 0; return; }
-  b.status = 'Пиляю';
-  b.t += dt;
-  if (b.t >= st.time) {
-    b.t = 0;
-    invAdd(b.input, 'log', -1);
-    b.fireT += st.yield; // fractional yield accumulates
-    const made = Math.floor(b.fireT); b.fireT -= made;
-    invAdd(b.store, 'plank', made);
+  for (const b of Object.values(w.buildings)) {
+    if (b.site) continue;
+    const def = BUILD[b.type];
+    if (def.proc) {
+      const p = procStats(b);
+      if (invGet(b.input, p.input) < 1) { b.status = `Чекаю: ${ITEMS[p.input].name.toLowerCase()}`; b.t = 0; continue; }
+      if (invGet(b.store, p.output) >= p.outCap) { b.status = 'Вихід повний'; b.t = 0; continue; }
+      b.status = 'Працює'; b.t += dt;
+      if (b.t >= p.time) { b.t = 0; invAdd(b.input, p.input, -1); b.frac += p.yield; const made = Math.floor(b.frac); b.frac -= made; invAdd(b.store, p.output, made); }
+    }
+    if (def.fuel && b.fuel > 0) {
+      const night = w.clock.phase === 'night' ? 2 : 1;
+      b.fuel = Math.max(0, b.fuel - dt * night / def.fuel.burn);
+      b.status = b.fuel <= 0 ? 'Згасло: підкинь палива!' : b.fuel < def.fuel.cap * 0.25 ? 'Мало палива' : 'Горить';
+      if (b.fuel <= 0) w.events.push({ t: 'lightOut', x: b.x, y: b.y });
+    } else if (def.fuel) b.status = 'Згасло: підкинь палива!';
   }
+}
+export function addFuel(w: World, b: Building, n: number) {
+  const f = BUILD[b.type].fuel!; b.fuel = Math.min(f.cap, b.fuel + n);
+  if (b.hp <= 0) b.hp = b.maxHp * 0.3; // relighting also patches it up a bit
 }
 
-// ---------------------------------------------------------------- pads
-/** One payment tick while the hero stands on a pad. Returns true if something was paid. */
-export function payPad(w: World, p: PadState): boolean {
-  const c = p.def.cost, h = w.hero;
-  const needCoins = (c.coins || 0) - p.paid;
-  if (needCoins > 0 && w.coins > 0) {
-    const chunk = Math.min(needCoins, w.coins, Math.max(1, Math.ceil((c.coins || 0) / 25)));
-    w.coins -= chunk; p.paid += chunk;
-    w.events.push({ t: 'fly', item: 'coin', fx: h.x, fy: h.y, fz: 40, to: { x: p.def.x, y: p.def.y } });
-    w.events.push({ t: 'pay', x: p.def.x, y: p.def.y });
-    checkPadDone(w, p); return true;
+// ---------------------------------------------------------------- placement
+export function placeCheck(w: World, type: BuildingType, x: number, y: number, ignore?: string): string | null {
+  const def = BUILD[type];
+  const R = townR(w), d = dist(x, y, TC.x, TC.y);
+  if (def.zone === 'town' && d > R - def.r * 0.5) return 'Лише в межах містечка';
+  if (def.zone === 'near' && d > R + 260) return 'Задалеко від містечка';
+  if (x < 80 || x > W - 80 || y < 140 || y > H - 70) return 'Край мапи';
+  for (const b of Object.values(w.buildings)) {
+    if (b.id === ignore) continue;
+    const gap = type === 'palisade' && b.type === 'palisade' ? -10 : 6;
+    if (dist(x, y, b.x, b.y) < def.r + BUILD[b.type].r + gap) return 'Заважає будівля';
+    for (const s of BUILD[b.type].slots || []) if (dist(x, y, b.x + s.dx, b.y + s.dy) < def.r + 26) return 'Закриває майданчик іншої будівлі';
   }
-  for (const [k, n] of costItems(c)) {
-    if (invGet(p.items, k) + invGet(p.incoming, k) >= n) continue;
-    const i = h.stack.lastIndexOf(k);
-    if (i >= 0) {
-      h.stack.splice(i, 1); invAdd(p.items, k, 1);
-      w.events.push({ t: 'fly', item: k, fx: h.x, fy: h.y, fz: 40, to: { x: p.def.x, y: p.def.y } });
-      checkPadDone(w, p); return true;
-    }
-  }
-  return false;
+  for (const s of def.slots || []) for (const b of Object.values(w.buildings)) if (b.id !== ignore && dist(x + s.dx, y + s.dy, b.x, b.y) < BUILD[b.type].r + 26) return 'Майданчик упирається в будівлю';
+  for (const n of w.nodes) if (n.alive && dist(x, y, n.x, n.y) < def.r + 14) return 'Заважає дерево чи камінь';
+  if (!w.flags.hedge && x < 520) return 'За хащами';
+  return null;
 }
-export function padMissing(p: PadState): { coins: number; items: [ItemId, number][] } {
-  const c = p.def.cost;
-  return { coins: Math.max(0, (c.coins || 0) - p.paid), items: costItems(c).map(([k, n]) => [k, Math.max(0, n - invGet(p.items, k))] as [ItemId, number]).filter(x => x[1] > 0) };
+export function buildLock(w: World, type: BuildingType): string | null {
+  const def = BUILD[type];
+  if (def.noBuild) return 'Вже є';
+  if (def.locked) return def.locked;
+  const r = reqMet(w, def.req); if (r) return r;
+  const max = def.max?.[hallLevel(w) - 1];
+  if (max !== undefined && count(w, type) >= max) return max === 0 ? 'Потрібна Ратуша вищого рівня' : `Ліміт ${max} на цьому рівні Ратуші`;
+  return null;
 }
-export function checkPadDone(w: World, p: PadState) {
-  const m = padMissing(p);
-  if (m.coins > 0 || m.items.length) return;
-  buildFromPad(w, p.def);
+export function place(w: World, type: BuildingType, x: number, y: number): Building | null {
+  const def = BUILD[type];
+  if (buildLock(w, type) || placeCheck(w, type, x, y) || w.coins < (def.cost.coins || 0)) return null;
+  w.coins -= def.cost.coins || 0;
+  const items = Object.fromEntries(costItems(def.cost)) as Partial<Record<ItemId, number>>;
+  const b = makeBuilding(w, type, x, y, { site: Object.keys(items).length ? items : null });
+  w.events.push({ t: 'placed', x, y });
+  if (!b.site) completeSite(w, b);
+  return b;
 }
-export function buildFromPad(w: World, d: PadDef) {
-  if (d.type === 'clear') w.flags['cleared_' + d.id] = true;
-  else makeBuilding(w, d.id, d.type, d.x, d.y, { role: d.role, gap: d.gap });
-  delete w.pads[d.id];
-  w.events.push({ t: 'build', x: d.x, y: d.y });
-  w.events.push({ t: 'toast', title: d.name + '!', body: d.msg });
+export function completeSite(w: World, b: Building) {
+  b.site = null; b.builtAt = w.time;
+  const def = BUILD[b.type];
+  if (def.fuel) b.fuel = def.fuel.cap * 0.6;
+  w.events.push({ t: 'build', x: b.x, y: b.y });
+  if (!w.flags['built_' + b.type]) { w.flags['built_' + b.type] = true; w.events.push({ t: 'toast', title: def.name + '!', body: def.desc }); }
   syncCats(w);
+}
+/** Hero or a cat drops one item into a construction site. */
+export function deliverToSite(w: World, b: Building, k: ItemId, n = 1) {
+  if (!b.site) return;
+  invAdd(b.incoming, k, -Math.min(n, invGet(b.incoming, k)));
+  const left = invGet(b.site, k) - n;
+  if (left <= 0) delete b.site[k]; else b.site[k] = left;
+  if (!Object.keys(b.site).length) completeSite(w, b);
+}
+export function moveBuilding(w: World, b: Building, x: number, y: number): boolean {
+  if (placeCheck(w, b.type, x, y, b.id)) return false;
+  b.x = x; b.y = y; w.events.push({ t: 'placed', x, y });
+  return true;
+}
+export function demolish(w: World, b: Building) {
+  if (BUILD[b.type].noBuild) return false;
+  const refund = Math.floor((BUILD[b.type].cost.coins || 0) * 0.5);
+  w.coins += refund;
+  for (const inv of [b.store, b.input]) for (const [k, n] of Object.entries(inv) as [ItemId, number][]) for (let i = 0; i < Math.min(n, 40); i++) w.ground.push({ id: w.nextId++, type: k, x: b.x + (Math.random() - 0.5) * 60, y: b.y + (Math.random() - 0.5) * 40, z: 20, vz: 100, age: 0 });
+  delete w.buildings[b.id];
+  w.cats = w.cats.filter(c => c.home !== b.id);
+  for (const u of w.units) { if (u.post === b.id) u.post = null; }
+  w.units = w.units.filter(u => u.home !== b.id);
+  w.events.push({ t: 'poof', x: b.x, y: b.y, kind: 'build' });
+  return true;
 }
 
 // ---------------------------------------------------------------- upgrades
-export function nextLevel(b: Building) {
-  const def = BUILDINGS[b.type];
-  if (!def.levels || b.level >= def.levels.length) return null;
-  return def.levels[b.level];
-}
+export function nextLevel(b: Building) { const def = BUILD[b.type]; return def.levels && b.level < def.levels.length ? def.levels[b.level] : null; }
 export function upgradeBuilding(w: World, b: Building): boolean {
   const nl = nextLevel(b);
-  if (!nl || !spend(w, nl.cost)) return false;
+  if (!nl || b.site || !spend(w, nl.cost)) return false;
   b.level++;
-  const hp = levelStats(b).hp;
-  if (hp) { b.maxHp = hp; b.hp = hp; }
+  const hp = levelStats(b).hp; if (hp) { b.maxHp = hp; b.hp = hp; }
   b.builtAt = w.time;
   w.events.push({ t: 'upgrade', x: b.x, y: b.y });
+  if (b.type === 'hall') w.events.push({ t: 'toast', title: `Ратуша: ${nl.label.split(':')[0]}`, body: 'Межі містечка розширилися. Нові будівлі в меню будівництва.' });
   syncCats(w);
   return true;
 }
 export function chooseSpec(w: World, b: Building, id: string): boolean {
-  const s = BUILDINGS[b.type].specs?.find(x => x.id === id);
+  const s = BUILD[b.type].specs?.find(x => x.id === id);
   if (!s || b.spec || !spend(w, s.cost)) return false;
-  b.spec = id; b.builtAt = w.time;
-  w.events.push({ t: 'upgrade', x: b.x, y: b.y });
+  b.spec = id; b.builtAt = w.time; w.events.push({ t: 'upgrade', x: b.x, y: b.y });
   return true;
 }
 export function heroUpgrade(w: World, id: (typeof HERO_UPG)[number]['id']): boolean {
-  const u = HERO_UPG.find(x => x.id === id)!;
-  const lv = w.up[id];
+  const u = HERO_UPG.find(x => x.id === id)!, lv = w.up[id];
   if (lv >= u.costs.length || (u.req && !w.flags[u.req]) || !spend(w, u.costs[lv])) return false;
   w.up[id]++;
   if (id === 'heart') w.hero.hp = 5 + w.up.heart;
   w.events.push({ t: 'upgrade', x: w.hero.x, y: w.hero.y - 30 });
   return true;
+}
+export function doProject(w: World, id: keyof typeof PROJECTS): boolean {
+  const p = PROJECTS[id];
+  if (w.flags[id] || reqMet(w, p.req) || !spend(w, p.cost)) return false;
+  w.flags[id] = true;
+  w.events.push({ t: 'toast', title: p.name, body: p.desc });
+  w.events.push({ t: 'build', x: 500, y: 1000 });
+  return true;
+}
+
+// ---------------------------------------------------------------- barracks
+export function unitCap(w: World) { return allOf(w, 'barracks').reduce((a, b) => a + (levelStats(b).units || 0), 0); }
+export function trainUnit(w: World, b: Building, k: UnitKind): boolean {
+  const queued = allOf(w, 'barracks').reduce((a, x) => a + (x.queue?.length || 0), 0);
+  if (w.units.length + queued >= unitCap(w) || !spend(w, UNITS[k].cost)) return false;
+  b.queue!.push(k);
+  return true;
+}
+export function barracksTick(w: World, dt: number) {
+  for (const b of allOf(w, 'barracks')) {
+    if (!b.queue?.length) { b.status = 'Чекаю новобранців'; continue; }
+    b.trainT = (b.trainT || 0) + dt; b.status = `Навчання: ${UNITS[b.queue[0]].name}`;
+    if (b.trainT >= UNITS[b.queue[0]].time) {
+      const k = b.queue.shift()!; b.trainT = 0;
+      const u = UNITS[k];
+      w.units.push({ id: w.nextId++, kind: k, home: b.id, post: null, x: b.x, y: b.y + 50, face: 1, walkT: 0, moving: false, hp: u.hp, maxHp: u.hp, woundT: 0, swingT: 0, swing: 0, stuckT: 0, lx: b.x, ly: b.y });
+      w.events.push({ t: 'bubble', who: w.units[w.units.length - 1].id, s: 'Варта на місці!' });
+    }
+  }
 }

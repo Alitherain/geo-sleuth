@@ -1,158 +1,161 @@
-// All game content as data. Adding a building, wave or upgrade should mostly mean editing this file.
+// All game content as data. A new building, wave or upgrade should mostly mean editing this file.
 
-export type ItemId = 'log' | 'lav' | 'plank' | 'meat' | 'fluff';
-export const ITEMS: Record<ItemId, { name: string; price: number; h: number }> = {
-  log: { name: 'Колода', price: 1, h: 9 },
-  lav: { name: 'Лавандова колода', price: 3, h: 9 },
-  plank: { name: 'Дошка', price: 3, h: 6 },
-  meat: { name: 'М\'ясо', price: 4, h: 10 },
-  fluff: { name: 'Пух', price: 2, h: 9 },
+export type ItemId = 'log' | 'lav' | 'plank' | 'stone' | 'berry' | 'meat' | 'candle' | 'fluff';
+export const ITEMS: Record<ItemId, { name: string; price: number; h: number; icon: string }> = {
+  log: { name: 'Колода', price: 1, h: 9, icon: '🪵' },
+  lav: { name: 'Лавандова колода', price: 3, h: 9, icon: '💜' },
+  plank: { name: 'Дошка', price: 3, h: 6, icon: '🟫' },
+  stone: { name: 'Камінь', price: 2, h: 9, icon: '🪨' },
+  berry: { name: 'Ягоди', price: 1, h: 8, icon: '🫐' },
+  meat: { name: 'М\'ясо', price: 3, h: 10, icon: '🍖' },
+  candle: { name: 'Свічка', price: 6, h: 10, icon: '🕯️' },
+  fluff: { name: 'Пух', price: 2, h: 9, icon: '☁️' },
 };
 export const ITEM_IDS = Object.keys(ITEMS) as ItemId[];
+export type Cost = Partial<Record<ItemId | 'coins', number>>;
 
 // ---------------------------------------------------------------- map
-export const W = 2400, H = 1600;
+export const W = 3000, H = 2000;
 export interface Rect { x: number; y: number; w: number; h: number }
-export const PLAZA: Rect = { x: 900, y: 560, w: 600, h: 580 };
-export const ROAD_Y = 850;
-export const EDGE: Rect = { x: 520, y: 140, w: 330, h: 1340 };   // Смарагдовий Узлісок
-export const GROVE: Rect = { x: 100, y: 140, w: 370, h: 1340 };  // Лавандовий Гай
-export const WILDS: Rect = { x: 1600, y: 140, w: 740, h: 1340 }; // Пустище
-export const HEDGE_X = 488;
-export const GAP_HALF = 46;
-export type GapId = 'W' | 'E' | 'S';
-export const GAPS: Record<GapId, { x: number; y: number; vertical: boolean; out: { x: number; y: number }; inn: { x: number; y: number } }> = {
-  W: { x: PLAZA.x, y: ROAD_Y, vertical: true, out: { x: PLAZA.x - 70, y: ROAD_Y }, inn: { x: PLAZA.x + 60, y: ROAD_Y } },
-  E: { x: PLAZA.x + PLAZA.w, y: ROAD_Y, vertical: true, out: { x: PLAZA.x + PLAZA.w + 70, y: ROAD_Y }, inn: { x: PLAZA.x + PLAZA.w - 60, y: ROAD_Y } },
-  S: { x: 1150, y: PLAZA.y + PLAZA.h, vertical: false, out: { x: 1150, y: PLAZA.y + PLAZA.h + 70 }, inn: { x: 1150, y: PLAZA.y + PLAZA.h - 60 } },
+export const TC = { x: 1500, y: 1000 };                       // town centre
+export const TOWN_R = [300, 430, 560];                          // buildable radius per hall level
+export const EDGE: Rect = { x: 560, y: 160, w: 340, h: 1680 };  // Смарагдовий Узлісок
+export const GROVE: Rect = { x: 110, y: 160, w: 360, h: 1680 }; // Лавандовий Гай
+export const HILLS: Rect = { x: 1050, y: 130, w: 1000, h: 300 }; // Кам'яні Пагорби
+export const MEADOW: Rect = { x: 1100, y: 1430, w: 900, h: 420 }; // Ягідна Галявина
+export const WILDS: Rect = { x: 2250, y: 160, w: 690, h: 1680 };  // Пустище
+export const HEDGE_X = 500;
+export const ROAD_Y = 1000;
+export const SPAWNS: Record<string, { x: number; y: number; name: string }> = {
+  N: { x: 1500, y: 90, name: 'з півночі' },
+  E: { x: 2930, y: 1000, name: 'зі сходу' },
+  S: { x: 1500, y: 1940, name: 'з півдня' },
+  W: { x: 70, y: 1000, name: 'із заходу' },
 };
-export const SPAWNS: Record<string, { x: number; y: number; gap: GapId }> = {
-  E: { x: 2330, y: ROAD_Y, gap: 'E' },
-  S: { x: 1150, y: 1560, gap: 'S' },
-  W: { x: 90, y: ROAD_Y, gap: 'W' },
-};
-export const HEART = { x: 1200, y: 890 };
 
 // ---------------------------------------------------------------- buildings
-export type BuildingType = 'shop' | 'storage' | 'sawmill' | 'forge' | 'bell' | 'catHouse' | 'palisade' | 'tower' | 'lantern' | 'clear';
-export type CatRole = 'lumber' | 'hauler' | 'guard';
-export type SlotKind = 'sell' | 'deposit' | 'sawIn' | 'sawOut' | 'forge' | 'bell';
+export type BuildingType =
+  | 'hall' | 'shop' | 'heart' | 'bonfire' | 'lantern' | 'ledLamp'
+  | 'houseGatherer' | 'houseHauler' | 'houseMaster'
+  | 'sawmill' | 'storage' | 'forge' | 'candleShop' | 'bell'
+  | 'palisade' | 'tower' | 'barracks' | 'post'
+  | 'flowerbed' | 'bench' | 'banner' | 'fountain';
+export type CatRole = 'gatherer' | 'hauler' | 'master';
+export type GatherKind = 'wood' | 'stone' | 'berry';
+export type SlotKind = 'sell' | 'deposit' | 'in' | 'out' | 'forge' | 'bell' | 'fuel';
+export type Category = 'eco' | 'light' | 'defense' | 'cats' | 'decor';
+export type Req = { b?: BuildingType; hall?: number; flag?: string };
 
 export interface LevelDef { cost: Cost; stats: Record<string, number>; label: string }
-export interface Cost { coins?: number; plank?: number; lav?: number; log?: number; fluff?: number }
-export interface BuildingDef {
-  name: string; r: number; hp?: number;
-  slots?: { kind: SlotKind; dx: number; dy: number }[];
-  levels?: LevelDef[];
+export interface BuildDef {
+  name: string; icon: string; desc: string; cat: Category; r: number;
+  cost: Cost; req: Req[]; max?: number[]; // max count per hall level
+  zone: 'town' | 'near'; // near = up to 260 beyond the town edge (defence)
+  hp?: number; levels?: LevelDef[];
   specs?: { id: string; name: string; desc: string; cost: Cost; stats: Record<string, number> }[];
+  slots?: { kind: SlotKind; dx: number; dy: number }[];
+  role?: CatRole; comfort?: number;
+  fuel?: { item: ItemId; cap: number; burn: number; radius: number }; // burn = seconds per unit (day)
+  proc?: { input: ItemId; output: ItemId; time: number; inCap: number; outCap: number };
+  noBuild?: boolean; locked?: string; continuous?: boolean;
 }
 
-export const BUILDINGS: Record<BuildingType, BuildingDef> = {
-  shop: { name: 'Лавка Пані Сови', r: 62, slots: [{ kind: 'sell', dx: 0, dy: 82 }] },
-  storage: {
-    name: 'Склад', r: 46, slots: [{ kind: 'deposit', dx: 0, dy: 70 }],
+export const BUILD: Record<BuildingType, BuildDef> = {
+  hall: { name: 'Ратуша', icon: '🏛️', desc: 'Серце містечка. Рівень Ратуші розширює межі й відкриває нові будівлі.', cat: 'eco', r: 58, cost: {}, req: [], zone: 'town', noBuild: true,
     levels: [
-      { cost: {}, stats: { cap: 80 }, label: 'Місткість 80' },
-      { cost: { coins: 60, plank: 15 }, stats: { cap: 160 }, label: 'Місткість 160' },
-      { cost: { coins: 150, lav: 10 }, stats: { cap: 320 }, label: 'Місткість 320' },
-    ],
-  },
-  sawmill: {
-    name: 'Лісопилка', r: 52, slots: [{ kind: 'sawIn', dx: -58, dy: 68 }, { kind: 'sawOut', dx: 58, dy: 68 }],
-    levels: [
-      { cost: {}, stats: { time: 1.2, inCap: 12, outCap: 20, yield: 1 }, label: '1 колода за 1.2 с' },
-      { cost: { coins: 80, plank: 10 }, stats: { time: 0.9, inCap: 20, outCap: 30, yield: 1 }, label: 'Швидше, більші запаси' },
-      { cost: { coins: 160, lav: 10 }, stats: { time: 0.7, inCap: 30, outCap: 40, yield: 1 }, label: 'Ще швидше' },
-    ],
-    specs: [
-      { id: 'fast', name: 'Швидкопил', desc: 'Пиляє вдвічі швидше', cost: { coins: 250, lav: 15 }, stats: { time: 0.35 } },
-      { id: 'fine', name: 'Ощадна пилка', desc: '2 колоди дають 3 дошки', cost: { coins: 250, lav: 15 }, stats: { yield: 1.5 } },
-    ],
-  },
-  forge: { name: 'Кузня Діда Ковадла', r: 44, slots: [{ kind: 'forge', dx: 0, dy: 66 }] },
-  bell: { name: 'Дзвін Ночі', r: 26, slots: [{ kind: 'bell', dx: 0, dy: 56 }] },
-  catHouse: {
-    name: 'Котячий будиночок', r: 24,
-    levels: [
-      { cost: {}, stats: { cats: 1 }, label: '1 котик' },
-      { cost: { coins: 100, plank: 10 }, stats: { cats: 2 }, label: '2 котики' },
-      { cost: { coins: 220, lav: 10 }, stats: { cats: 3 }, label: '3 котики' },
-    ],
-  },
-  palisade: {
-    name: 'Частокіл', r: 0, hp: 60,
-    levels: [
-      { cost: {}, stats: { hp: 60 }, label: 'Міцність 60' },
-      { cost: { lav: 10 }, stats: { hp: 150 }, label: 'Лавандовий частокіл, міцність 150' },
-    ],
-  },
-  tower: {
-    name: 'Башта-рогатка', r: 22, hp: 80,
-    levels: [
-      { cost: {}, stats: { dmg: 2, rate: 1.0, range: 180 }, label: 'Шишка раз на секунду' },
-      { cost: { coins: 90, lav: 10 }, stats: { dmg: 3.5, rate: 0.7, range: 210 }, label: 'Важчі шишки, частіше' },
-    ],
-  },
-  lantern: {
-    name: 'Ліхтар', r: 10, hp: 40,
-    levels: [
-      { cost: {}, stats: { hp: 40 }, label: 'Міцність 40' },
-      { cost: { coins: 60, lav: 5 }, stats: { hp: 90 }, label: 'Міцність 90' },
-    ],
-  },
-  clear: { name: 'Просіка', r: 0 },
+      { cost: {}, stats: { radius: 300 }, label: 'Хутір' },
+      { cost: { coins: 150, plank: 30, stone: 15 }, stats: { radius: 430 }, label: 'Містечко: ширші межі, Казарма, Свічкарня' },
+      { cost: { coins: 450, plank: 60, stone: 40, lav: 20, candle: 10 }, stats: { radius: 560 }, label: 'Місто: найширші межі, кам\'яні мури' },
+    ] },
+  shop: { name: 'Лавка Пані Сови', icon: '🦉', desc: 'Купує все. Ху-ху.', cat: 'eco', r: 46, cost: {}, req: [], zone: 'town', noBuild: true, slots: [{ kind: 'sell', dx: 0, dy: 62 }] },
+  heart: { name: 'Великий Костер', icon: '🔥', desc: 'Головне світло. Якщо згасне все світло — ніч програна.', cat: 'light', r: 26, cost: {}, req: [], zone: 'town', noBuild: true, hp: 150,
+    fuel: { item: 'log', cap: 30, burn: 30, radius: 250 }, slots: [{ kind: 'fuel', dx: 0, dy: 48 }] },
+  bonfire: { name: 'Костер', icon: '🔥', desc: 'Світло на дровах. Звірі в світлі слабшають і повільнішають.', cat: 'light', r: 20, cost: { coins: 8, log: 4 }, req: [], max: [3, 6, 10], zone: 'near', hp: 50,
+    fuel: { item: 'log', cap: 10, burn: 24, radius: 185 }, slots: [{ kind: 'fuel', dx: 0, dy: 40 }] },
+  lantern: { name: 'Ліхтар на свічках', icon: '🏮', desc: 'Світить ширше й довше за костер, але їсть свічки.', cat: 'light', r: 12, cost: { coins: 30, plank: 4, stone: 2 }, req: [{ b: 'candleShop' }], max: [0, 6, 12], zone: 'near', hp: 70,
+    fuel: { item: 'candle', cap: 6, burn: 50, radius: 245 }, slots: [{ kind: 'fuel', dx: 0, dy: 36 }] },
+  ledLamp: { name: 'LED-ліхтар', icon: '💡', desc: 'Світло без вогню.', cat: 'light', r: 12, cost: {}, req: [{ hall: 3 }], zone: 'near', locked: 'Наступна глава: Електрика' },
+  houseGatherer: { name: 'Будиночок збирачів', icon: '🐱', desc: 'Котики рубають, видобувають камінь або збирають ягоди — як накажеш.', cat: 'cats', r: 24, cost: { coins: 15 }, req: [], max: [2, 4, 6], zone: 'town', role: 'gatherer',
+    levels: [{ cost: {}, stats: { cats: 1 }, label: '1 котик' }, { cost: { coins: 80, plank: 8 }, stats: { cats: 2 }, label: '2 котики' }, { cost: { coins: 180, plank: 10, stone: 8 }, stats: { cats: 3 }, label: '3 котики' }] },
+  houseHauler: { name: 'Будиночок носіїв', icon: '🐈', desc: 'Носії возять між будівлями, підкидають дрова в костри, продають надлишок.', cat: 'cats', r: 24, cost: { coins: 50 }, req: [{ b: 'storage' }], max: [1, 2, 3], zone: 'town', role: 'hauler',
+    levels: [{ cost: {}, stats: { cats: 1 }, label: '1 котик' }, { cost: { coins: 90, plank: 8 }, stats: { cats: 2 }, label: '2 котики' }, { cost: { coins: 200, plank: 10, stone: 8 }, stats: { cats: 3 }, label: '3 котики' }] },
+  houseMaster: { name: 'Майстерня майстрів', icon: '🛠️', desc: 'Майстри лагодять частоколи, башти й світло.', cat: 'cats', r: 24, cost: { coins: 70, plank: 8 }, req: [{ b: 'forge' }], max: [1, 2, 2], zone: 'town', role: 'master',
+    levels: [{ cost: {}, stats: { cats: 1 }, label: '1 майстер' }, { cost: { coins: 120, plank: 10, stone: 6 }, stats: { cats: 2 }, label: '2 майстри' }] },
+  sawmill: { name: 'Лісопилка', icon: '🪚', desc: 'Колоди → дошки.', cat: 'eco', r: 46, cost: { coins: 35 }, req: [{ b: 'houseGatherer' }], max: [1, 2, 3], zone: 'town',
+    slots: [{ kind: 'in', dx: -52, dy: 60 }, { kind: 'out', dx: 52, dy: 60 }],
+    proc: { input: 'log', output: 'plank', time: 1.2, inCap: 12, outCap: 20 },
+    levels: [{ cost: {}, stats: { speed: 1, cap: 1 }, label: 'Звичайна' }, { cost: { coins: 70, plank: 10 }, stats: { speed: 1.35, cap: 1.6 }, label: 'Швидше, більші запаси' }, { cost: { coins: 150, stone: 12, lav: 6 }, stats: { speed: 1.7, cap: 2.2 }, label: 'Ще швидше' }],
+    specs: [{ id: 'fast', name: 'Швидкопил', desc: 'Пиляє вдвічі швидше', cost: { coins: 220, lav: 12 }, stats: { speed: 3.4 } }, { id: 'fine', name: 'Ощадна пилка', desc: '2 колоди дають 3 дошки', cost: { coins: 220, lav: 12 }, stats: { yield: 1.5 } }] },
+  storage: { name: 'Склад', icon: '📦', desc: 'Котики зносять сюди все. Надлишок носії продають самі.', cat: 'eco', r: 42, cost: { coins: 25, plank: 6 }, req: [{ b: 'sawmill' }], max: [1, 1, 2], zone: 'town',
+    slots: [{ kind: 'deposit', dx: 0, dy: 58 }],
+    levels: [{ cost: {}, stats: { cap: 100 }, label: 'Місткість 100' }, { cost: { coins: 60, plank: 15 }, stats: { cap: 200 }, label: 'Місткість 200' }, { cost: { coins: 150, stone: 20 }, stats: { cap: 400 }, label: 'Місткість 400' }] },
+  forge: { name: 'Кузня Діда Ковадла', icon: '🔨', desc: 'Прокачка героя: рюкзак, сокиропила, чоботи, серце.', cat: 'eco', r: 40, cost: { coins: 35, plank: 6 }, req: [{ b: 'sawmill' }], max: [1, 1, 1], zone: 'town', slots: [{ kind: 'forge', dx: 0, dy: 56 }] },
+  candleShop: { name: 'Свічкарня', icon: '🕯️', desc: 'М\'ясо (жир) → свічки для ліхтарів. Свічки ще й дорого продаються.', cat: 'eco', r: 40, cost: { coins: 90, plank: 15, stone: 10 }, req: [{ hall: 2 }], max: [0, 1, 2], zone: 'town',
+    slots: [{ kind: 'in', dx: -46, dy: 56 }, { kind: 'out', dx: 46, dy: 56 }], proc: { input: 'meat', output: 'candle', time: 2.5, inCap: 10, outCap: 20 } },
+  bell: { name: 'Дзвін Ночі', icon: '🔔', desc: 'Покликати ніч раніше за розкладом: +25% нагороди.', cat: 'defense', r: 22, cost: { coins: 25, plank: 6 }, req: [{ b: 'storage' }], max: [1, 1, 1], zone: 'town', slots: [{ kind: 'bell', dx: 0, dy: 48 }] },
+  palisade: { name: 'Частокіл', icon: '🪵', desc: 'Секція огорожі. Ставиться ланцюжком. Звірі гризуть її замість світла.', cat: 'defense', r: 20, cost: { plank: 3 }, req: [{ b: 'sawmill' }], max: [30, 60, 100], zone: 'near', hp: 60, continuous: true,
+    levels: [{ cost: {}, stats: { hp: 60 }, label: 'Дерев\'яний, міцність 60' }, { cost: { stone: 3 }, stats: { hp: 170 }, label: 'Кам\'яний мур, міцність 170' }] },
+  tower: { name: 'Башта-рогатка', icon: '🏹', desc: 'Стріляє шишками по звірах.', cat: 'defense', r: 24, cost: { coins: 45, plank: 10, stone: 5 }, req: [{ b: 'forge' }], max: [2, 5, 9], zone: 'near', hp: 90,
+    levels: [{ cost: {}, stats: { dmg: 2, rate: 1.0, range: 190 }, label: 'Шишка раз на секунду' }, { cost: { coins: 80, lav: 8, stone: 6 }, stats: { dmg: 3.5, rate: 0.7, range: 220 }, label: 'Лавандові шишки, частіше' }] },
+  barracks: { name: 'Казарма Котячої Варти', icon: '⚔️', desc: 'Навчає котиків-воїнів. Їх розставляєш по постах.', cat: 'defense', r: 46, cost: { coins: 110, plank: 20, stone: 10 }, req: [{ hall: 2 }], max: [0, 1, 2], zone: 'town',
+    levels: [{ cost: {}, stats: { units: 4 }, label: 'До 4 воїнів' }, { cost: { coins: 160, plank: 20, stone: 15 }, stats: { units: 8 }, label: 'До 8 воїнів' }, { cost: { coins: 320, stone: 30, lav: 10 }, stats: { units: 12 }, label: 'До 12 воїнів' }] },
+  post: { name: 'Пост варти', icon: '🚩', desc: 'Точка оборони. Признач, скільки воїнів тут стоїть.', cat: 'defense', r: 14, cost: { coins: 10, plank: 2 }, req: [{ b: 'barracks' }], max: [0, 4, 8], zone: 'near' },
+  flowerbed: { name: 'Квітник', icon: '🌷', desc: 'Затишок +1: котики трохи швидші.', cat: 'decor', r: 18, cost: { coins: 8, berry: 2 }, req: [], max: [4, 8, 14], zone: 'town', comfort: 1 },
+  bench: { name: 'Лавочка', icon: '🪑', desc: 'Затишок +1.', cat: 'decor', r: 18, cost: { plank: 5 }, req: [{ b: 'sawmill' }], max: [3, 6, 10], zone: 'town', comfort: 1 },
+  banner: { name: 'Прапор Ліхтарників', icon: '🎏', desc: 'Затишок +2.', cat: 'decor', r: 12, cost: { coins: 15, fluff: 3 }, req: [{ hall: 2 }], max: [0, 4, 8], zone: 'town', comfort: 2 },
+  fountain: { name: 'Фонтан', icon: '⛲', desc: 'Затишок +4. Котики обожнюють.', cat: 'decor', r: 34, cost: { coins: 80, stone: 20 }, req: [{ hall: 2 }], max: [0, 1, 2], zone: 'town', comfort: 4 },
+};
+export const CATEGORIES: { id: Category; name: string; icon: string }[] = [
+  { id: 'eco', name: 'Господарство', icon: '🏠' }, { id: 'cats', name: 'Котики', icon: '🐱' }, { id: 'light', name: 'Світло', icon: '🔥' },
+  { id: 'defense', name: 'Оборона', icon: '🛡️' }, { id: 'decor', name: 'Затишок', icon: '🌷' },
+];
+
+// special one-off projects, not placed on the map
+export const PROJECTS = {
+  hedge: { name: 'Розчистити хащі', icon: '🌿', desc: 'Відкриває Лавандовий Гай: лавандова деревина для башт і рівнів.', cost: { coins: 100 } as Cost, req: [{ b: 'forge' }] as Req[] },
 };
 
-// ---------------------------------------------------------------- build pads (the progression)
-export interface PadDef {
-  id: string; type: BuildingType; name: string; icon: string; x: number; y: number;
-  cost: Cost; req: string[]; role?: CatRole; gap?: GapId; msg: string;
-}
-export const PADS: PadDef[] = [
-  { id: 'catLumber', type: 'catHouse', role: 'lumber', name: 'Котик-лісоруб', icon: '🐱', x: 990, y: 640, cost: { coins: 20 }, req: [], msg: 'Профспілка Котів на зв\'язку. Платня: рибка і повага.' },
-  { id: 'sawmill', type: 'sawmill', name: 'Лісопилка', icon: '🪚', x: 1030, y: 1030, cost: { coins: 60 }, req: ['catLumber'], msg: 'Колоди → дошки. Дошки потрібні для будівництва.' },
-  { id: 'storage', type: 'storage', name: 'Склад', icon: '📦', x: 1320, y: 1030, cost: { coins: 40, plank: 8 }, req: ['sawmill'], msg: 'Сюди котики зноситимуть усе. Надлишок продається сам.' },
-  { id: 'catHauler', type: 'catHouse', role: 'hauler', name: 'Котик-носій', icon: '🐈', x: 1410, y: 640, cost: { coins: 80 }, req: ['storage'], msg: 'Носить між будівлями. Повними рейсами, обіцяє.' },
-  { id: 'forge', type: 'forge', name: 'Кузня', icon: '🔨', x: 1005, y: 790, cost: { coins: 60, plank: 10 }, req: ['sawmill'], msg: 'Дід Ковадло прокинувся. Дзень — це «так».' },
-  { id: 'bell', type: 'bell', name: 'Дзвін Ночі', icon: '🔔', x: 1400, y: 790, cost: { coins: 50, plank: 12 }, req: ['storage'], msg: 'Коли будеш готовий — подзвони, і прийде Пухнаста Ніч.' },
-  { id: 'palE', type: 'palisade', gap: 'E', name: 'Частокіл', icon: '🪵', x: GAPS.E.x, y: GAPS.E.y, cost: { plank: 15 }, req: ['bell'], msg: 'Звірі гризтимуть його замість ліхтарів.' },
-  { id: 'palS', type: 'palisade', gap: 'S', name: 'Частокіл', icon: '🪵', x: GAPS.S.x, y: GAPS.S.y, cost: { plank: 15 }, req: ['bell'], msg: 'Південні ворота під захистом.' },
-  { id: 'palW', type: 'palisade', gap: 'W', name: 'Частокіл', icon: '🪵', x: GAPS.W.x, y: GAPS.W.y, cost: { plank: 15 }, req: ['hedge'], msg: 'Тепер і з лісу не пролізуть.' },
-  { id: 'hedge', type: 'clear', name: 'Розчистити хащі', icon: '🌿', x: 545, y: ROAD_Y, cost: { coins: 120 }, req: ['forge'], msg: 'Лавандовий Гай! Лавандова деревина потрібна для башт.' },
-  { id: 'catGuard', type: 'catHouse', role: 'guard', name: 'Котик-сторож', icon: '🐈‍⬛', x: 1450, y: 975, cost: { coins: 150, plank: 15 }, req: ['bell'], msg: 'Вдень лагодить, уночі стоїть на воротах.' },
-  { id: 'towerE', type: 'tower', name: 'Башта-рогатка', icon: '🏹', x: 1565, y: 740, cost: { coins: 60, lav: 10 }, req: ['bell', 'hedge'], msg: 'Стріляє шишками. Влучно. Іноді.' },
-  { id: 'towerS', type: 'tower', name: 'Башта-рогатка', icon: '🏹', x: 1265, y: 1205, cost: { coins: 60, lav: 10 }, req: ['towerE'], msg: 'Південь прикрито.' },
-  { id: 'towerW', type: 'tower', name: 'Башта-рогатка', icon: '🏹', x: 835, y: 740, cost: { coins: 60, lav: 10 }, req: ['towerE', 'palW'], msg: 'Захід прикрито.' },
-  { id: 'lanW', type: 'lantern', name: 'Ліхтар', icon: '🏮', x: 1090, y: 935, cost: { coins: 40, lav: 5 }, req: ['hedge'], msg: 'Більше світла — менше Пухняви.' },
-  { id: 'lanE', type: 'lantern', name: 'Ліхтар', icon: '🏮', x: 1310, y: 935, cost: { coins: 40, lav: 5 }, req: ['lanW'], msg: 'Площа сяє.' },
-];
+// ---------------------------------------------------------------- units
+export type UnitKind = 'spear' | 'sling';
+export const UNITS: Record<UnitKind, { name: string; icon: string; cost: Cost; time: number; hp: number; dmg: number; rate: number; range: number; speed: number }> = {
+  spear: { name: 'Котик-списоносець', icon: '🗡️', cost: { coins: 25, berry: 3 }, time: 8, hp: 22, dmg: 3, rate: 0.8, range: 26, speed: 120 },
+  sling: { name: 'Котик-рогатник', icon: '🎯', cost: { coins: 35, meat: 2, plank: 2 }, time: 10, hp: 12, dmg: 2, rate: 1.0, range: 170, speed: 115 },
+};
 
 // ---------------------------------------------------------------- hero upgrades (forge)
 export interface HeroUpg { id: 'bag' | 'axe' | 'boots' | 'heart' | 'mint'; icon: string; name: string; desc: (lv: number) => string; costs: Cost[]; req?: string }
 export const HERO_UPG: HeroUpg[] = [
-  { id: 'bag', icon: '🎒', name: 'Бездонний рюкзак', desc: lv => `Місткість ${10 + lv * 6} → ${16 + lv * 6}`, costs: [{ coins: 30 }, { coins: 70, plank: 5 }, { coins: 150, plank: 10 }, { coins: 300, lav: 8 }, { coins: 600, lav: 15 }] },
-  { id: 'axe', icon: '🪓', name: 'Сокиропила', desc: lv => `Сила ×${(1 + lv * .6).toFixed(1)} → ×${(1 + (lv + 1) * .6).toFixed(1)}`, costs: [{ coins: 40 }, { coins: 90, plank: 5 }, { coins: 180, plank: 10 }, { coins: 350, lav: 8 }, { coins: 700, lav: 15 }] },
-  { id: 'boots', icon: '👢', name: 'Чоботи-скороходи', desc: () => 'Швидкість +12%', costs: [{ coins: 35 }, { coins: 80 }, { coins: 170, plank: 8 }, { coins: 340, lav: 6 }] },
-  { id: 'heart', icon: '❤️', name: 'Міцне серденько', desc: lv => `Життя ${5 + lv} → ${6 + lv}`, costs: [{ coins: 60 }, { coins: 150, fluff: 5 }, { coins: 320, fluff: 10 }, { coins: 600, fluff: 20 }] },
+  { id: 'bag', icon: '🎒', name: 'Бездонний рюкзак', desc: lv => `Місткість ${12 + lv * 6} → ${18 + lv * 6}`, costs: [{ coins: 25 }, { coins: 60, plank: 5 }, { coins: 130, plank: 10 }, { coins: 260, stone: 10 }, { coins: 520, lav: 12 }] },
+  { id: 'axe', icon: '🪓', name: 'Сокиропила', desc: lv => `Сила ×${(1 + lv * .6).toFixed(1)} → ×${(1 + (lv + 1) * .6).toFixed(1)}`, costs: [{ coins: 35 }, { coins: 80, plank: 5 }, { coins: 160, stone: 8 }, { coins: 320, lav: 8 }, { coins: 640, lav: 15 }] },
+  { id: 'boots', icon: '👢', name: 'Чоботи-скороходи', desc: () => 'Швидкість +12%', costs: [{ coins: 30 }, { coins: 70 }, { coins: 150, plank: 8 }, { coins: 300, fluff: 8 }] },
+  { id: 'heart', icon: '❤️', name: 'Міцне серденько', desc: lv => `Життя ${5 + lv} → ${6 + lv}`, costs: [{ coins: 50 }, { coins: 130, fluff: 5 }, { coins: 280, fluff: 10 }, { coins: 550, fluff: 20 }] },
   { id: 'mint', icon: '🌿', name: 'Котяча м\'ятка', desc: () => 'Усі котики +12% швидкості й +2 місця', costs: [{ coins: 120, fluff: 10 }, { coins: 260, fluff: 20 }, { coins: 500, fluff: 35 }], req: 'boss1' },
 ];
 
 // ---------------------------------------------------------------- nights
-export type EnemyKind = 'fluff' | 'horn' | 'boss';
-export const ENEMIES: Record<EnemyKind, { hp: number; r: number; speed: number; dmg: number; wallMul: number; drops: Partial<Record<ItemId, number>> }> = {
-  fluff: { hp: 6, r: 17, speed: 48, dmg: 4, wallMul: 1, drops: { meat: 1, fluff: 1 } },
-  horn: { hp: 16, r: 22, speed: 38, dmg: 8, wallMul: 3, drops: { meat: 2, fluff: 2 } },
-  boss: { hp: 180, r: 52, speed: 55, dmg: 15, wallMul: 4, drops: { fluff: 12, meat: 6 } },
+export const DAY_LEN = 170, DUSK_LEN = 25, FIRST_DAY_MAX = 420;
+export type EnemyKind = 'fluff' | 'horn' | 'shade' | 'boss';
+export const ENEMIES: Record<EnemyKind, { name: string; hp: number; r: number; speed: number; dmg: number; wallMul: number; burn: number }> = {
+  fluff: { name: 'Пухляк', hp: 6, r: 17, speed: 50, dmg: 4, wallMul: 1, burn: 1 },
+  horn: { name: 'Рогатик', hp: 16, r: 22, speed: 40, dmg: 8, wallMul: 3, burn: 0.7 },
+  shade: { name: 'Тінь', hp: 5, r: 15, speed: 78, dmg: 6, wallMul: 0.5, burn: 4 },
+  boss: { name: 'Пан Пухнастий', hp: 200, r: 52, speed: 55, dmg: 12, wallMul: 4, burn: 0.3 },
 };
 export interface WaveEntry { at: number; kind: EnemyKind; from: string }
-export function waveFor(night: number, hasGrove: boolean): { entries: WaveEntry[]; reward: number; title: string } {
+export function waveFor(night: number, hasGrove: boolean): { entries: WaveEntry[]; reward: number; title: string; dirs: string[] } {
+  const all = hasGrove ? ['E', 'N', 'S', 'W'] : ['E', 'N', 'S'];
+  const nd = Math.min(all.length, 1 + Math.ceil(night / 1.5));
+  const dirs = all.slice(0, nd);
   const e: WaveEntry[] = [];
-  const add = (n: number, kind: EnemyKind, from: string, start: number, gap: number) => { for (let i = 0; i < n; i++) e.push({ at: start + i * gap, kind, from }); };
-  if (night === 1) { add(6, 'fluff', 'E', 2, 2.2); return { entries: e, reward: 60, title: 'Перша Пухнаста Ніч' }; }
-  if (night === 2) { add(7, 'fluff', 'E', 2, 1.8); add(5, 'fluff', 'S', 8, 2); add(2, 'horn', 'E', 14, 4); return { entries: e, reward: 110, title: 'Друга Пухнаста Ніч' }; }
-  if (night === 3) { add(6, 'fluff', 'S', 2, 1.6); add(1, 'boss', 'E', 6, 1); add(6, 'fluff', 'E', 12, 2.5); return { entries: e, reward: 500, title: 'Ніч Пана Пухнастого' }; }
-  const k = night - 3, froms = hasGrove ? ['E', 'S', 'W'] : ['E', 'S'];
-  froms.forEach((f, i) => { add(5 + k * 2, 'fluff', f, 2 + i * 3, 1.6); add(1 + Math.floor(k / 2), 'horn', f, 10 + i * 3, 4); });
-  if (k % 3 === 0) add(1, 'boss', 'E', 15, 1);
-  return { entries: e, reward: 120 + k * 60, title: `Пухнаста Ніч №${night}` };
+  const total = 9 + night * 6;
+  // three sub-waves so the night has a rhythm
+  for (let i = 0; i < total; i++) {
+    const sub = Math.floor(i / (total / 3));
+    const kind: EnemyKind = night >= 2 && i % 5 === 4 ? 'shade' : night >= 2 && i % 7 === 6 ? 'horn' : 'fluff';
+    e.push({ at: 3 + sub * 22 + (i % Math.ceil(total / 3)) * 1.1, kind, from: dirs[i % dirs.length] });
+  }
+  const boss = night === 4 || (night > 4 && night % 4 === 0);
+  if (boss) e.push({ at: 30, kind: 'boss', from: 'E' });
+  e.sort((a, b) => a.at - b.at);
+  return { entries: e, reward: 40 + night * 30 + (boss ? 300 : 0), title: boss ? 'Ніч Пана Пухнастого' : `Пухнаста Ніч №${night}`, dirs };
 }

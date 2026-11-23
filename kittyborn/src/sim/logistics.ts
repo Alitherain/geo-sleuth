@@ -1,41 +1,39 @@
 // Cat AI and the job board.
-// Buildings and pads expose needs and sources; an idle cat scores every possible trip and claims the best one.
-// Claims reserve the amount at the source and at the target, so two cats never chase the same goods,
-// and a cat finishes the trip it started instead of turning around for every new item.
-import { BUILDINGS, GAPS, ITEMS, PADS, type CatRole, type GapId, type ItemId } from '../content/data';
-import { collide, moveToward, routeVia } from './physics';
-import { available, catCap, catSpeed, costItems, dist, invAdd, invGet, invTotal, isDone, levelStats, padVisible, storageFree, treeOpen, type Building, type Cat, type P, type Task, type World } from './world';
-import { checkPadDone, sell } from './economy';
+// Buildings expose needs (production input, construction sites, fuel) and sources (production output, storage).
+// An idle hauler scores every possible trip and claims the best one. Claims reserve the amount at both ends,
+// so two cats never chase the same goods and a cat finishes the trip it started.
+import { BUILD, ITEMS, type GatherKind, type ItemId } from '../content/data';
+import { collide, moveToward } from './physics';
+import { allOf, available, catBoost, catCap, catSpeed, dist, invAdd, invGet, nodeOpen, procStats, storageFree, type Building, type Cat, type P, type ResNode, type World } from './world';
+import { addFuel, deliverToSite, sell } from './economy';
 
-// ---------------------------------------------------------------- endpoints
-// 'sawmill:in' | 'sawmill:out' | 'storage' | 'shop' | 'pad:<id>'
-export function endpointPos(w: World, ep: string): P | null {
-  if (ep.startsWith('pad:')) { const p = w.pads[ep.slice(4)]; return p ? { x: p.def.x, y: p.def.y } : null; }
-  const [id, part] = ep.split(':'); const b = w.buildings[id]; if (!b) return null;
-  const slots = BUILDINGS[b.type].slots || [];
-  const s = part === 'in' ? slots.find(x => x.kind === 'sawIn') : part === 'out' ? slots.find(x => x.kind === 'sawOut') : slots[0];
-  return s ? { x: b.x + s.dx, y: b.y + s.dy } : { x: b.x, y: b.y + 40 };
+// ---------------------------------------------------------------- endpoints: "<buildingId>|<part>"
+type Part = 'in' | 'out' | 'store' | 'site' | 'fuel' | 'sell';
+const ep = (b: Building, part: Part) => b.id + '|' + part;
+const parse = (w: World, s: string): [Building | undefined, Part] => { const [id, part] = s.split('|'); return [w.buildings[id], part as Part]; };
+export function endpointPos(w: World, s: string): P | null {
+  const [b, part] = parse(w, s); if (!b) return null;
+  if (part === 'site') return { x: b.x, y: b.y + BUILD[b.type].r + 10 };
+  const want = part === 'store' ? 'deposit' : part;
+  const slot = (BUILD[b.type].slots || []).find(x => x.kind === want);
+  return slot ? { x: b.x + slot.dx, y: b.y + slot.dy } : { x: b.x, y: b.y + BUILD[b.type].r + 10 };
 }
-function reserveSource(w: World, ep: string, k: ItemId, n: number) { const b = w.buildings[ep.split(':')[0]]; if (b) invAdd(b.reserved, k, n); }
-function reserveTarget(w: World, ep: string, k: ItemId, n: number) {
-  if (ep.startsWith('pad:')) { const p = w.pads[ep.slice(4)]; if (p) invAdd(p.incoming, k, n); return; }
-  const b = w.buildings[ep.split(':')[0]]; if (b && ep !== 'shop') invAdd(b.incoming, k, n);
-}
-function takeFrom(w: World, ep: string, k: ItemId, n: number): number {
-  const b = w.buildings[ep.split(':')[0]]; if (!b) return 0;
+function reserveSource(w: World, s: string, k: ItemId, n: number) { const [b] = parse(w, s); if (b) invAdd(b.reserved, k, n); }
+function reserveTarget(w: World, s: string, k: ItemId, n: number) { const [b, part] = parse(w, s); if (b && part !== 'sell') invAdd(b.incoming, k, n); }
+function takeFrom(w: World, s: string, k: ItemId, n: number): number {
+  const [b] = parse(w, s); if (!b) return 0;
   invAdd(b.reserved, k, -n);
   const got = Math.min(n, invGet(b.store, k)); invAdd(b.store, k, -got); return got;
 }
-function giveTo(w: World, ep: string, k: ItemId, n: number, at: P) {
-  if (ep === 'shop') { sell(w, k, n, at.x, at.y - 60); return; }
-  if (ep.startsWith('pad:')) {
-    const p = w.pads[ep.slice(4)];
-    if (!p) { const s = w.buildings['storage']; if (s) invAdd(s.store, k, n); else sell(w, k, n, at.x, at.y); return; }
-    invAdd(p.incoming, k, -n); invAdd(p.items, k, n); checkPadDone(w, p); return;
-  }
-  const [id, part] = ep.split(':'); const b = w.buildings[id]; if (!b) return;
-  invAdd(b.incoming, k, -n);
-  if (part === 'in') invAdd(b.input, k, n); else invAdd(b.store, k, n);
+function giveTo(w: World, s: string, k: ItemId, at: P) {
+  const [b, part] = parse(w, s);
+  if (!b) return;
+  if (part === 'sell') { sell(w, k, 1, at.x, at.y - 50); return; }
+  if (part === 'site') { deliverToSite(w, b, k, 1); return; }
+  invAdd(b.incoming, k, -1);
+  if (part === 'fuel') addFuel(w, b, 1);
+  else if (part === 'in') invAdd(b.input, k, 1);
+  else invAdd(b.store, k, 1);
 }
 export function releaseTask(w: World, c: Cat) {
   const t = c.task; if (!t) return;
@@ -43,181 +41,168 @@ export function releaseTask(w: World, c: Cat) {
     if (t.stage === 'toSource' && t.from) reserveSource(w, t.from, t.item, -t.n);
     if (t.to) reserveTarget(w, t.to, t.item, -(t.stage === 'toSource' ? t.n : c.stack.filter(i => i === t.item).length));
   }
-  if (t.kind === 'harvest' && t.tree) { const tr = w.trees.find(x => x.id === t.tree); if (tr && tr.claimedBy === c.id) tr.claimedBy = 0; }
+  if (t.kind === 'harvest' && t.node) { const n = w.nodes.find(x => x.id === t.node); if (n && n.claimedBy === c.id) n.claimedBy = 0; }
   c.task = null;
 }
 
 // ---------------------------------------------------------------- needs
-const RESERVE: Partial<Record<ItemId, number>> = { plank: 30, lav: 20, log: 15, fluff: 25, meat: 0 };
+export const RESERVE: Partial<Record<ItemId, number>> = { plank: 30, lav: 20, log: 20, stone: 25, berry: 15, meat: 10, candle: 12, fluff: 25 };
 export interface Trip { from: string; to: string; item: ItemId; n: number; prio: number; why: string }
+const shopEp = (w: World) => { const s = w.buildings.shop; return s ? ep(s, 'sell') : ''; };
+function bestStorage(w: World, n: number, near: P): Building | undefined {
+  return allOf(w, 'storage').filter(s => storageFree(s) >= n).sort((a, b) => dist(a.x, a.y, near.x, near.y) - dist(b.x, b.y, near.x, near.y))[0];
+}
+function sourceFor(w: World, k: ItemId, near: P): Building | undefined {
+  return allOf(w, 'storage').filter(s => available(s, k) > 0).sort((a, b) => dist(a.x, a.y, near.x, near.y) - dist(b.x, b.y, near.x, near.y))[0];
+}
+export function fuelNeed(b: Building): number {
+  const f = BUILD[b.type].fuel; if (!f || b.site) return 0;
+  return Math.floor(f.cap - b.fuel - invGet(b.incoming, f.item));
+}
 
-/** Every trip worth making right now, ignoring who makes it. */
 export function listTrips(w: World, cap: number): Trip[] {
   const trips: Trip[] = [];
-  const st = w.buildings['storage'], saw = w.buildings['sawmill'];
-  const sinkFor = (k: ItemId, n: number): string => (st && storageFree(st) >= n ? 'storage' : 'shop');
-  if (saw) {
-    const s = levelStats(saw);
-    const out = available(saw, 'plank');
-    const blocked = invGet(saw.store, 'plank') >= s.outCap * 0.7;
-    if (out >= Math.min(cap, 4) || (blocked && out > 0)) trips.push({ from: 'sawmill:out', to: sinkFor('plank', Math.min(cap, out)), item: 'plank', n: Math.min(cap, out), prio: blocked ? 3 : 2, why: 'Забрати дошки з лісопилки' });
-    const want = s.inCap - invGet(saw.input, 'log') - invGet(saw.incoming, 'log');
-    if (st && want >= Math.min(cap, 4) && available(st, 'log') > 0) trips.push({ from: 'storage', to: 'sawmill:in', item: 'log', n: Math.min(cap, want, available(st, 'log')), prio: invGet(saw.input, 'log') === 0 ? 3 : 2, why: 'Підвезти колоди на лісопилку' });
-  }
-  if (st) {
-    for (const p of Object.values(w.pads)) {
-      if (!padVisible(w, p)) continue;
-      for (const [k, n] of costItems(p.def.cost)) {
-        const miss = n - invGet(p.items, k) - invGet(p.incoming, k);
-        const av = available(st, k);
-        if (miss > 0 && av > 0) trips.push({ from: 'storage', to: 'pad:' + p.def.id, item: k, n: Math.min(cap, miss, av), prio: 3, why: `Привезти на будову: ${p.def.name}` });
+  const night = w.clock.phase !== 'day';
+  for (const b of Object.values(w.buildings)) {
+    const def = BUILD[b.type];
+    if (b.site) {
+      for (const [k, n] of Object.entries(b.site) as [ItemId, number][]) {
+        const miss = n - invGet(b.incoming, k), src = sourceFor(w, k, b);
+        if (miss > 0 && src) trips.push({ from: ep(src, 'store'), to: ep(b, 'site'), item: k, n: Math.min(cap, miss, available(src, k)), prio: 3, why: `Будова: ${def.name}` });
       }
+      continue;
     }
-    for (const k of Object.keys(ITEMS) as ItemId[]) {
-      const surplus = available(st, k) - (RESERVE[k] || 0);
-      if (surplus >= Math.min(cap, 4) || (k === 'meat' && surplus > 0)) trips.push({ from: 'storage', to: 'shop', item: k, n: Math.min(cap, surplus), prio: 1, why: 'Продати надлишок' });
+    if (def.fuel) {
+      const need = fuelNeed(b), src = sourceFor(w, def.fuel.item, b);
+      if (src && need >= Math.min(cap, def.fuel.cap * 0.5)) trips.push({ from: ep(src, 'store'), to: ep(b, 'fuel'), item: def.fuel.item, n: Math.min(cap, need, available(src, def.fuel.item)), prio: b.fuel < def.fuel.cap * 0.2 ? 6 : night ? 5 : 3, why: `Паливо: ${def.name}` });
     }
+    if (def.proc) {
+      const p = procStats(b);
+      const out = available(b, p.output), blocked = invGet(b.store, p.output) >= p.outCap * 0.7;
+      if (out >= Math.min(cap, 4) || (blocked && out > 0)) {
+        const st = bestStorage(w, Math.min(cap, out), b);
+        trips.push({ from: ep(b, 'out'), to: st ? ep(st, 'store') : shopEp(w), item: p.output, n: Math.min(cap, out), prio: blocked ? 3 : 2, why: `Забрати: ${ITEMS[p.output].name.toLowerCase()}` });
+      }
+      const want = p.inCap - invGet(b.input, p.input) - invGet(b.incoming, p.input), src = sourceFor(w, p.input, b);
+      if (src && want >= Math.min(cap, 4)) trips.push({ from: ep(src, 'store'), to: ep(b, 'in'), item: p.input, n: Math.min(cap, want, available(src, p.input)), prio: invGet(b.input, p.input) === 0 ? 3 : 2, why: `Підвезти: ${ITEMS[p.input].name.toLowerCase()}` });
+    }
+  }
+  if (w.buildings.shop) for (const st of allOf(w, 'storage')) for (const k of Object.keys(ITEMS) as ItemId[]) {
+    const surplus = available(st, k) - (RESERVE[k] || 0);
+    if (surplus >= Math.min(cap, 4)) trips.push({ from: ep(st, 'store'), to: shopEp(w), item: k, n: Math.min(cap, surplus), prio: 1, why: 'Продати надлишок' });
   }
   return trips;
 }
 
-function claimTrip(w: World, c: Cat, tr: Trip) {
-  reserveSource(w, tr.from, tr.item, tr.n);
-  reserveTarget(w, tr.to, tr.item, tr.n);
-  c.task = { kind: 'haul', item: tr.item, from: tr.from, to: tr.to, n: tr.n, stage: 'toSource' };
-}
-
-/** Where a lumber cat should drop an item it already carries. */
-function dropTarget(w: World, k: ItemId, n: number): string {
-  const saw = w.buildings['sawmill'], st = w.buildings['storage'];
-  if (k === 'log' && saw) { const s = levelStats(saw); if (invGet(saw.input, 'log') + invGet(saw.incoming, 'log') + n <= s.inCap) return 'sawmill:in'; }
-  // without a hauler nobody moves goods out of storage, so sell instead of piling up dead stock
+/** Where a cat should drop an item it already carries. */
+function dropTarget(w: World, k: ItemId, n: number, near: P): string {
+  for (const b of Object.values(w.buildings)) { const f = BUILD[b.type].fuel; if (f && f.item === k && !b.site && b.fuel + invGet(b.incoming, k) < f.cap * 0.4) return ep(b, 'fuel'); }
+  for (const b of Object.values(w.buildings)) if (b.site && invGet(b.site, k) - invGet(b.incoming, k) >= 1) return ep(b, 'site');
+  for (const b of Object.values(w.buildings)) { const p = BUILD[b.type].proc; if (p && p.input === k && !b.site) { const s = procStats(b); if (invGet(b.input, k) + invGet(b.incoming, k) + n <= s.inCap) return ep(b, 'in'); } }
   const hauler = w.cats.some(c => c.role === 'hauler');
-  if (st && storageFree(st) >= n && (hauler || k !== 'log')) return 'storage';
-  return 'shop';
+  const st = bestStorage(w, n, near);
+  if (st && (hauler || k !== 'log')) return ep(st, 'store');
+  return shopEp(w);
 }
 
 // ---------------------------------------------------------------- spawning
 export function syncCats(w: World) {
   for (const b of Object.values(w.buildings)) {
-    if (b.type !== 'catHouse' || !b.role) continue;
-    const want = levelStats(b).cats || 1;
+    const role = BUILD[b.type].role; if (!role || b.site) continue;
+    const want = BUILD[b.type].levels ? (BUILD[b.type].levels![b.level - 1].stats.cats || 1) : 1;
     const have = w.cats.filter(c => c.home === b.id).length;
-    for (let i = have; i < want; i++) spawnCat(w, b, b.role);
+    for (let i = have; i < want; i++) {
+      w.cats.push({ id: w.nextId++, role, home: b.id, x: b.x, y: b.y + 30, face: 1, walkT: 0, moving: false, stack: [], task: null, idle: '', swingT: 0, swing: 0, waitT: 0, stuckT: 0, lx: b.x, ly: b.y, hidden: false });
+      w.events.push({ t: 'bubble', who: w.cats[w.cats.length - 1].id, s: 'Мяу. Я на зміні.' });
+    }
   }
-}
-function spawnCat(w: World, home: Building, role: CatRole) {
-  w.cats.push({ id: w.nextId++, role, home: home.id, x: home.x, y: home.y + 30, face: 1, walkT: 0, moving: false, stack: [], task: null, idle: '', swingT: 0, swing: 0, waitT: 0, stuckT: 0, lx: home.x, ly: home.y, hidden: false });
-  w.events.push({ t: 'bubble', who: w.cats[w.cats.length - 1].id, s: 'Мяу! Я на зміні.' });
 }
 
 // ---------------------------------------------------------------- per-cat update
-function walk(w: World, c: Cat, tx: number, ty: number, dt: number, spd = catSpeed(w), arrive = 6): boolean {
-  const wp = routeVia(w, c.x, c.y, tx, ty);
-  const final = wp.x === tx && wp.y === ty;
-  const arrived = moveToward(c, wp.x, wp.y, spd, dt, final ? arrive : 8);
-  return final && arrived;
-}
-
 export function updateCats(w: World, dt: number) {
   for (const c of w.cats) {
     c.swingT -= dt; if (c.swing > 0) c.swing = Math.max(0, c.swing - dt * 4.5);
-    // unstick: if trying to move but not moving, jiggle
     c.stuckT += dt;
-    if (c.stuckT > 0.9) { if (c.moving && dist(c.x, c.y, c.lx, c.ly) < 6) { c.x += (Math.random() - 0.5) * 30; c.y += (Math.random() - 0.5) * 30; } c.lx = c.x; c.ly = c.y; c.stuckT = 0; }
-    const night = w.night.phase === 'night';
-    if (night && c.role !== 'guard') { goHome(w, c, dt); continue; }
+    if (c.stuckT > 0.9) { if (c.moving && dist(c.x, c.y, c.lx, c.ly) < 6) { c.x += (Math.random() - 0.5) * 34; c.y += (Math.random() - 0.5) * 34; } c.lx = c.x; c.ly = c.y; c.stuckT = 0; }
+    if (w.clock.phase === 'night' && c.role === 'gatherer') { goHome(w, c, dt); continue; }
     if (c.hidden) { c.hidden = false; const h = w.buildings[c.home]; if (h) { c.x = h.x; c.y = h.y + 30; } }
-    if (c.role === 'lumber') lumber(w, c, dt);
+    if (c.role === 'gatherer') gatherer(w, c, dt);
     else if (c.role === 'hauler') hauler(w, c, dt);
-    else guard(w, c, dt, night);
+    else master(w, c, dt);
     if (!c.hidden) collide(w, c, 10);
   }
 }
-
 function goHome(w: World, c: Cat, dt: number) {
-  if (c.task) releaseTask(w, c);
+  if (c.task?.kind === 'harvest') releaseTask(w, c);
+  if (c.task?.kind === 'haul') { carry(w, c, dt); return; } // finish the delivery first
   if (c.hidden) return;
   const h = w.buildings[c.home]; if (!h) return;
-  if (walk(w, c, h.x, h.y + 26, dt, catSpeed(w) * 1.3)) c.hidden = true;
+  if (moveToward(c, h.x, h.y + 26, catSpeed(w) * 1.3, dt, 8)) c.hidden = true;
   collide(w, c, 10);
 }
-
-function lumber(w: World, c: Cat, dt: number) {
+const GATHER_NODES: Record<GatherKind, ResNode['kind'][]> = { wood: ['oak', 'pine', 'lav'], stone: ['rock'], berry: ['bush'] };
+function gatherer(w: World, c: Cat, dt: number) {
   const cap = catCap(w, c);
   if (c.task?.kind === 'haul') return carry(w, c, dt);
-  // decide to deliver
   if (c.stack.length >= cap || (c.stack.length > 0 && c.waitT > 4)) {
     releaseTask(w, c); c.waitT = 0;
-    const k = c.stack[c.stack.length - 1];
-    const n = c.stack.filter(i => i === k).length;
-    const to = dropTarget(w, k, n);
-    reserveTarget(w, to, k, n);
-    c.task = { kind: 'haul', item: k, to, n, stage: 'toTarget' };
+    const k = c.stack[c.stack.length - 1], n = c.stack.filter(i => i === k).length, to = dropTarget(w, k, n, c);
+    reserveTarget(w, to, k, n); c.task = { kind: 'haul', item: k, to, n, stage: 'toTarget' };
     return;
   }
-  let t = c.task?.kind === 'harvest' ? w.trees.find(x => x.id === c.task!.tree) : undefined;
-  if (!t || !t.alive || !treeOpen(w, t)) {
+  const kinds = GATHER_NODES[w.buildings[c.home]?.gather || 'wood'];
+  let t = c.task?.kind === 'harvest' ? w.nodes.find(x => x.id === c.task!.node) : undefined;
+  if (!t || !t.alive || !nodeOpen(w, t)) {
     if (c.task) releaseTask(w, c);
-    const st = w.buildings['storage'];
-    const wantLav = isDone(w, 'hedge') && (!st || invGet(st.store, 'lav') < 25);
-    let best = undefined as typeof t, bd = 1e9;
-    for (const tr of w.trees) {
-      if (!tr.alive || !treeOpen(w, tr) || (tr.claimedBy && tr.claimedBy !== c.id)) continue;
-      const d = dist(c.x, c.y, tr.x, tr.y) - (wantLav && tr.kind === 'lav' ? 500 : 0);
-      if (d < bd) { bd = d; best = tr; }
+    const st = allOf(w, 'storage')[0], wantLav = !!w.flags.hedge && (!st || invGet(st.store, 'lav') < 25);
+    let best: ResNode | undefined, bd = 1e9;
+    for (const n of w.nodes) {
+      if (!n.alive || !kinds.includes(n.kind) || !nodeOpen(w, n) || (n.claimedBy && n.claimedBy !== c.id)) continue;
+      const d = dist(c.x, c.y, n.x, n.y) - (wantLav && n.kind === 'lav' ? 500 : 0);
+      if (d < bd) { bd = d; best = n; }
     }
     t = best;
-    if (t) { t.claimedBy = c.id; c.task = { kind: 'harvest', tree: t.id, n: 0, stage: 'work' }; c.idle = ''; }
+    if (t) { t.claimedBy = c.id; c.task = { kind: 'harvest', node: t.id, n: 0, stage: 'work' }; c.idle = ''; }
   }
-  if (!t) { c.idle = 'Нема дерев'; c.waitT += dt; c.moving = false; return; }
+  if (!t) { c.idle = kinds[0] === 'rock' ? 'Нема каменю' : kinds[0] === 'bush' ? 'Ягоди ще не виросли' : 'Нема дерев'; c.waitT += dt; c.moving = false; return; }
   c.waitT = 0;
-  if (dist(c.x, c.y, t.x, t.y) > 34) walk(w, c, t.x + (c.x < t.x ? -26 : 26), t.y + 4, dt);
-  else {
-    c.moving = false; c.face = t.x > c.x ? 1 : -1;
-    if (c.swingT <= 0) { c.swing = 1; c.swingT = 0.8 / (1 + w.up.mint * 0.12); hitTree(w, t, c); }
-  }
+  if (dist(c.x, c.y, t.x, t.y) > 34) moveToward(c, t.x + (c.x < t.x ? -26 : 26), t.y + 4, catSpeed(w), dt, 6);
+  else { c.moving = false; c.face = t.x > c.x ? 1 : -1; if (c.swingT <= 0) { c.swing = 1; c.swingT = 0.8 / catBoost(w); harvestNode(w, t, c); } }
 }
-
 function hauler(w: World, c: Cat, dt: number) {
   if (c.task) return carry(w, c, dt);
   const cap = catCap(w, c);
-  // pick up loose goods (night drops) first if near plaza
-  const trips = listTrips(w, cap);
   let best: Trip | null = null, bs = -1e9;
-  for (const tr of trips) {
+  for (const tr of listTrips(w, cap)) {
     const a = endpointPos(w, tr.from), b = endpointPos(w, tr.to); if (!a || !b) continue;
     const s = tr.prio * 1000 + tr.n * 20 - dist(c.x, c.y, a.x, a.y) - dist(a.x, a.y, b.x, b.y) * 0.5;
     if (s > bs) { bs = s; best = tr; }
   }
-  if (best) { claimTrip(w, c, best); c.idle = ''; return; }
-  // collect ground loot
-  const g = w.ground.filter(x => x.age > 1 && dist(x.x, x.y, 1200, 850) < 1000).sort((a, b) => dist(c.x, c.y, a.x, a.y) - dist(c.x, c.y, b.x, b.y))[0];
+  if (best) { reserveSource(w, best.from, best.item, best.n); reserveTarget(w, best.to, best.item, best.n); c.task = { kind: 'haul', item: best.item, from: best.from, to: best.to, n: best.n, stage: 'toSource' }; c.idle = ''; return; }
+  // pick up loot on the ground near town
+  const g = w.ground.filter(x => x.age > 1 && dist(x.x, x.y, 1500, 1000) < 900).sort((a, b) => dist(c.x, c.y, a.x, a.y) - dist(c.x, c.y, b.x, b.y))[0];
   if (g) {
-    if (walk(w, c, g.x, g.y, dt, catSpeed(w), 10)) {
-      for (let i = w.ground.length - 1; i >= 0 && c.stack.length < cap; i--) {
-        const q = w.ground[i]; if (dist(q.x, q.y, c.x, c.y) < 50) { c.stack.push(q.type); w.ground.splice(i, 1); w.events.push({ t: 'fly', item: q.type, fx: q.x, fy: q.y, fz: 0, to: c.id }); }
-      }
-      if (c.stack.length && (c.stack.length >= cap || !w.ground.some(q => dist(q.x, q.y, c.x, c.y) < 200))) {
-        const k = c.stack[c.stack.length - 1], n = c.stack.filter(i => i === k).length, to = dropTarget(w, k, n);
-        reserveTarget(w, to, k, n); c.task = { kind: 'haul', item: k, to, n, stage: 'toTarget' };
-      }
+    if (moveToward(c, g.x, g.y, catSpeed(w), dt, 10)) {
+      for (let i = w.ground.length - 1; i >= 0 && c.stack.length < cap; i--) { const q = w.ground[i]; if (dist(q.x, q.y, c.x, c.y) < 50) { c.stack.push(q.type); w.ground.splice(i, 1); w.events.push({ t: 'fly', item: q.type, fx: q.x, fy: q.y, fz: 0, to: c.id }); } }
+      if (c.stack.length && (c.stack.length >= cap || !w.ground.some(q => dist(q.x, q.y, c.x, c.y) < 200))) deliverCarried(w, c);
     }
     c.idle = ''; return;
   }
-  if (c.stack.length) { const k = c.stack[c.stack.length - 1], n = c.stack.filter(i => i === k).length, to = dropTarget(w, k, n); reserveTarget(w, to, k, n); c.task = { kind: 'haul', item: k, to, n, stage: 'toTarget' }; return; }
-  const st = w.buildings['storage'];
+  if (c.stack.length) { deliverCarried(w, c); return; }
+  const st = allOf(w, 'storage')[0];
   c.idle = st && storageFree(st) <= 0 ? 'Склад повний' : 'Нема роботи';
-  // idle: rest near home
-  const h = w.buildings[c.home]; if (h) walk(w, c, h.x + 30, h.y + 40, dt, catSpeed(w) * 0.5, 12);
+  const h = w.buildings[c.home]; if (h) moveToward(c, h.x + 30, h.y + 40, catSpeed(w) * 0.5, dt, 12);
 }
-
+function deliverCarried(w: World, c: Cat) {
+  const k = c.stack[c.stack.length - 1], n = c.stack.filter(i => i === k).length, to = dropTarget(w, k, n, c);
+  reserveTarget(w, to, k, n); c.task = { kind: 'haul', item: k, to, n, stage: 'toTarget' };
+}
 function carry(w: World, c: Cat, dt: number) {
   const t = c.task!;
   if (t.stage === 'toSource' && t.from) {
     const p = endpointPos(w, t.from);
     if (!p) { releaseTask(w, c); return; }
-    if (walk(w, c, p.x, p.y, dt)) {
+    if (moveToward(c, p.x, p.y, catSpeed(w), dt, 6)) {
       const got = takeFrom(w, t.from, t.item!, t.n);
       for (let i = 0; i < got; i++) { c.stack.push(t.item!); w.events.push({ t: 'fly', item: t.item!, fx: p.x, fy: p.y, fz: 10, to: c.id }); }
       if (got < t.n && t.to) reserveTarget(w, t.to, t.item!, got - t.n);
@@ -227,87 +212,47 @@ function carry(w: World, c: Cat, dt: number) {
     return;
   }
   const p = t.to ? endpointPos(w, t.to) : null;
-  if (!p) { // target vanished (e.g. pad completed): re-route what we carry
-    const k = t.item!, n = c.stack.filter(i => i === k).length, to = dropTarget(w, k, n);
-    reserveTarget(w, to, k, n); t.to = to; return;
+  const [tb, part] = t.to ? parse(w, t.to) : [undefined, 'store' as Part];
+  if (!p || (part === 'site' && tb && !tb.site)) { // target vanished or finished: re-route what we carry
+    if (tb && t.to) reserveTarget(w, t.to, t.item!, -c.stack.filter(i => i === t.item).length);
+    const k = t.item!, n = c.stack.filter(i => i === k).length; if (!n) { c.task = null; return; }
+    const to = dropTarget(w, k, n, c); reserveTarget(w, to, k, n); t.to = to; return;
   }
-  if (walk(w, c, p.x, p.y, dt)) {
+  if (moveToward(c, p.x, p.y, catSpeed(w), dt, 6)) {
     c.moving = false;
     if (c.swingT > 0) return;
     const i = c.stack.lastIndexOf(t.item!);
     if (i < 0) { c.task = null; return; }
     c.stack.splice(i, 1);
     w.events.push({ t: 'fly', item: t.item!, fx: c.x, fy: c.y, fz: 26, to: { x: p.x, y: p.y - 20 } });
-    giveTo(w, t.to!, t.item!, 1, p);
+    giveTo(w, t.to!, t.item!, p);
     t.n--; c.swingT = 0.1;
     if (!c.stack.includes(t.item!)) { if (t.n > 0) reserveTarget(w, t.to!, t.item!, -t.n); c.task = null; }
   }
 }
-
-function guard(w: World, c: Cat, dt: number, night: boolean) {
-  if (night) {
-    const guards = w.cats.filter(x => x.role === 'guard');
-    const gaps = (['E', 'S', 'W'] as GapId[]).filter(g => g !== 'W' || isDone(w, 'hedge'));
-    const g = GAPS[gaps[guards.indexOf(c) % gaps.length]];
-    let target = null as null | (typeof w.enemies)[number], bd = 1e9;
-    for (const e of w.enemies) { if (e.passive) continue; const d = dist(g.x, g.y, e.x, e.y); if (d < 230 && d < bd) { bd = d; target = e; } }
-    if (target) {
-      const d = dist(c.x, c.y, target.x, target.y);
-      if (d > target.r + 22) walk(w, c, target.x, target.y, dt, catSpeed(w) * 1.1, 4);
-      else { c.moving = false; c.face = target.x > c.x ? 1 : -1; if (c.swingT <= 0) { c.swing = 1; c.swingT = 0.7; damageEnemy(w, target, 2 + w.up.mint * 0.5, c.x, c.y); } }
-    } else walk(w, c, g.inn.x, g.inn.y, dt, catSpeed(w), 10);
-    c.idle = '';
-    return;
-  }
-  // day: repair the most damaged structure
-  const dmg = Object.values(w.buildings).filter(b => (b.type === 'palisade' || b.type === 'tower' || b.type === 'lantern') && b.hp < b.maxHp).sort((a, b) => a.hp / a.maxHp - b.hp / b.maxHp)[0];
-  if (!dmg) { c.idle = 'Усе ціле'; const h = w.buildings[c.home]; if (h) walk(w, c, h.x - 30, h.y + 40, dt, catSpeed(w) * 0.5, 12); return; }
+function master(w: World, c: Cat, dt: number) {
+  const dmg = Object.values(w.buildings).filter(b => !b.site && (b.type === 'palisade' || b.type === 'tower' || BUILD[b.type].fuel) && b.hp < b.maxHp)
+    .sort((a, b) => a.hp / a.maxHp - b.hp / b.maxHp)[0];
+  if (!dmg) { c.idle = 'Усе ціле'; const h = w.buildings[c.home]; if (h) moveToward(c, h.x - 30, h.y + 40, catSpeed(w) * 0.5, dt, 12); return; }
   c.idle = '';
-  if (walk(w, c, dmg.x + (c.x < dmg.x ? -30 : 30), dmg.y + 20, dt, catSpeed(w), 10)) {
+  if (moveToward(c, dmg.x + (c.x < dmg.x ? -BUILD[dmg.type].r - 10 : BUILD[dmg.type].r + 10), dmg.y + 14, catSpeed(w), dt, 8)) {
     c.moving = false; c.face = dmg.x > c.x ? 1 : -1;
-    if (c.swingT <= 0) { c.swing = 1; c.swingT = 0.5; dmg.hp = Math.min(dmg.maxHp, dmg.hp + 6); w.events.push({ t: 'chop', x: dmg.x, y: dmg.y, kind: 'repair' }); }
+    if (c.swingT <= 0) { c.swing = 1; c.swingT = 0.5; dmg.hp = Math.min(dmg.maxHp, dmg.hp + 6 * catBoost(w)); w.events.push({ t: 'chop', x: dmg.x, y: dmg.y, kind: 'repair' }); }
   }
 }
 
-// ---------------------------------------------------------------- shared actions (used by hero too)
-export function hitTree(w: World, t: World['trees'][number], by: Cat | 'hero', dmg = 1) {
-  t.hp -= dmg; t.shake = 1;
-  w.events.push({ t: 'chop', x: t.x, y: t.y, kind: by === 'hero' ? 'hero' : 'cat' });
-  if (t.hp > 0) return;
-  t.alive = false; t.regrow = t.kind === 'lav' ? 45 : 28; t.claimedBy = 0;
+// ---------------------------------------------------------------- shared actions (hero uses them too)
+export function harvestNode(w: World, n: ResNode, by: Cat | 'hero', dmg = 1) {
+  n.hp -= dmg; n.shake = 1;
+  w.events.push({ t: n.kind === 'rock' ? 'mine' : 'chop', x: n.x, y: n.y, kind: by === 'hero' ? 'hero' : 'cat' });
+  if (n.hp > 0) return;
+  n.alive = false; n.claimedBy = 0;
+  n.regrow = n.kind === 'lav' ? 45 : n.kind === 'rock' ? 70 : n.kind === 'bush' ? 35 : 28;
   w.stats.felled++;
-  w.events.push({ t: 'fell', x: t.x, y: t.y, kind: t.kind });
-  const item: ItemId = t.kind === 'lav' ? 'lav' : 'log';
-  const holder = by === 'hero' ? w.hero : by;
-  const cap = by === 'hero' ? 10 + w.up.bag * 6 : catCap(w, by);
-  for (let i = 0; i < t.logs; i++) {
-    if (holder.stack.length < cap) { holder.stack.push(item); w.events.push({ t: 'fly', item, fx: t.x, fy: t.y, fz: 20, to: by === 'hero' ? 'hero' : by.id }); }
-    else w.ground.push({ id: w.nextId++, type: item, x: t.x + (Math.random() - 0.5) * 50, y: t.y + (Math.random() - 0.3) * 30, z: 30, vz: 100, age: 0 });
+  w.events.push({ t: 'fell', x: n.x, y: n.y, kind: n.kind });
+  const holder = by === 'hero' ? w.hero : by, cap = by === 'hero' ? 12 + w.up.bag * 6 : catCap(w, by);
+  for (let i = 0; i < n.yield; i++) {
+    if (holder.stack.length < cap) { holder.stack.push(n.item); w.events.push({ t: 'fly', item: n.item, fx: n.x, fy: n.y, fz: 20, to: by === 'hero' ? 'hero' : by.id }); }
+    else w.ground.push({ id: w.nextId++, type: n.item, x: n.x + (Math.random() - 0.5) * 50, y: n.y + (Math.random() - 0.3) * 30, z: 30, vz: 100, age: 0 });
   }
 }
-
-export function damageEnemy(w: World, e: World['enemies'][number], dmg: number, fx: number, fy: number) {
-  e.hp -= dmg; e.flash = 0.15;
-  const d = Math.hypot(e.x - fx, e.y - fy) || 1, kb = e.kind === 'boss' ? 60 : 240;
-  e.kx = (e.x - fx) / d * kb; e.ky = (e.y - fy) / d * kb;
-  if (e.passive) e.aggro = 6;
-  w.events.push({ t: 'hit', x: e.x, y: e.y - e.r, v: dmg });
-  if (e.hp > 0) return;
-  w.enemies.splice(w.enemies.indexOf(e), 1);
-  w.stats.hunted++;
-  w.events.push({ t: 'poof', x: e.x, y: e.y - e.r, kind: e.kind });
-  if (e.kind === 'boss') {
-    const first = !w.flags.boss1;
-    w.flags.boss1 = true; w.stats.bosses++;
-    const bonus = first ? 500 : 300;
-    w.coins += bonus; w.stats.earned += bonus;
-    w.events.push({ t: 'bossDown' });
-    w.events.push({ t: 'coin', x: e.x, y: e.y - 120, v: bonus });
-    w.events.push({ t: 'toast', title: 'ЗДОБИЧ ВПОЛЮВАНО', body: first ? 'Пан Пухнастий заснув. Корона твоя, а в Кузні відкрилась Котяча м\'ятка.' : `Пан Пухнастий знову спить. +${bonus} монет.` });
-  }
-  const drops = e.passive ? { meat: 2 } : ({ fluff: 1, meat: 1, ...(e.kind === 'horn' ? { fluff: 2, meat: 2 } : {}), ...(e.kind === 'boss' ? { fluff: 12, meat: 6 } : {}) } as Partial<Record<ItemId, number>>);
-  for (const [k, n] of Object.entries(drops) as [ItemId, number][]) for (let i = 0; i < n; i++)
-    w.ground.push({ id: w.nextId++, type: k, x: e.x + (Math.random() - 0.5) * 40, y: e.y + (Math.random() - 0.5) * 30, z: 25, vz: 120, age: 0 });
-}
-
-export { PADS, invTotal };

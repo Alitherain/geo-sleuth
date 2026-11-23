@@ -17,8 +17,10 @@
   <div class="pill" id="coins"><span class="coin"></span><span id="coinN">0</span></div>
   <div class="pill small">🎒 <span id="bagN">0/10</span></div>
   <div id="hearts" hidden></div>
+  <div class="pill small" id="clock">☀️</div>
 </div>
 <div class="hud" id="hudR">
+  <button class="btn build" id="bBuild" aria-label="Будівництво">🔨</button>
   <button class="btn" id="bFull" aria-label="На весь екран">⛶</button>
   <button class="btn" id="bSnd" aria-label="Звук">🔊</button>
   <button class="btn" id="bMenu" aria-label="Меню">☰</button>
@@ -26,6 +28,13 @@
 <div id="hint" class="off"></div>
 <div id="toast"><b></b><span></span></div>
 <div id="card"></div>
+<button id="chip" hidden></button>
+<div id="drawer">
+  <div class="dtop"><div id="buildHint"></div><div id="ghostWhy"></div>
+    <div class="dbtns"><button class="ubtn ok" id="bOk" hidden>✓ Поставити</button><button class="ubtn ghost" id="bCancel">✕</button></div></div>
+  <div id="tabs"></div>
+  <div id="blist"></div>
+</div>
 <div id="bossbar" hidden><div class="n">Пан Пухнастий, Жах Блідого Місяця</div><div class="b"><div class="f" id="bossF"></div></div></div>
 <div class="band" id="dead"><b>ВИ ПРИЛЯГЛИ</b><span>Рюкзак розсипався. Ліхтар чекає на площі.</span></div>
 <div class="band gold" id="win"><b>ЗДОБИЧ ВПОЛЮВАНО</b><span>Пан Пухнастий тепер просто Пухнастий.</span></div>

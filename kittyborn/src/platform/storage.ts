@@ -12,9 +12,11 @@ export function saveWorld(w: World) {
   } catch { /* storage unavailable */ }
 }
 export function loadWorld(): World | null {
+  let old: unknown = null;
   for (const k of [KEY, BACKUP]) {
-    try { const raw = localStorage.getItem(k); if (raw) return deserialize(JSON.parse(raw) as SaveEnvelope); } catch { /* try backup */ }
+    try { const raw = localStorage.getItem(k); if (raw) return deserialize(JSON.parse(raw) as SaveEnvelope); } catch (e) { old = old || e; }
   }
+  if (old && (old as Error).name === 'Error' && String((old as Error).message).includes('першої версії')) throw old;
   return null;
 }
 export function clearSave() { try { localStorage.removeItem(KEY); localStorage.removeItem(BACKUP); } catch { /* ignore */ } }
