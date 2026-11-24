@@ -166,7 +166,7 @@ function killEnemy(w: World, e: Enemy, byLight: boolean) {
     const first = !w.flags.boss1; w.flags.boss1 = true; w.stats.bosses++;
     const bonus = first ? 500 : 300; w.coins += bonus; w.stats.earned += bonus;
     w.events.push({ t: 'bossDown' }); w.events.push({ t: 'coin', x: e.x, y: e.y - 120, v: bonus });
-    w.events.push({ t: 'toast', title: 'ЗДОБИЧ ВПОЛЮВАНО', body: first ? 'Пан Пухнастий заснув. Корона твоя, а в Кузні відкрилась Котяча м\'ятка.' : `Пан Пухнастий знову спить. +${bonus} монет.` });
+    w.events.push({ t: 'toast', title: 'ЗДОБИЧ ВПОЛЮВАНО', body: first ? 'Звір Блідого Місяця впав. У Кузні відкрилась Котяча м\'ятка: котики пам\'ятатимуть.' : `Звір знову впав. +${bonus} монет.` });
   }
   const drops: Partial<Record<ItemId, number>> = e.passive ? { meat: 2 } : e.kind === 'shade' ? { fluff: 1 } : e.kind === 'horn' ? { meat: 2, fluff: 2 } : e.kind === 'boss' ? { fluff: 12, meat: 6 } : { meat: 1, fluff: 1 };
   for (const [k, n] of Object.entries(drops) as [ItemId, number][]) for (let j = 0; j < n; j++)
@@ -252,7 +252,7 @@ function assignPosts(w: World) {
 export function hurtUnit(w: World, u: Unit, n: number) {
   if (u.woundT > 0) return;
   u.hp -= n * 2; w.events.push({ t: 'hurt', x: u.x, y: u.y - 20, kind: 'unit' });
-  if (u.hp <= 0) { u.hp = 0; u.woundT = 25; w.events.push({ t: 'bubble', who: u.id, s: 'Мяв! Йду лікуватись.' }); }
+  if (u.hp <= 0) { u.hp = 0; u.woundT = 25; w.events.push({ t: 'bubble', who: u.id, s: 'Поранений. До казарми.' }); }
 }
 export function hurtHero(w: World, n: number) {
   const h = w.hero;

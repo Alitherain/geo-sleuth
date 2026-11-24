@@ -143,7 +143,7 @@ export const ENEMIES: Record<EnemyKind, { name: string; hp: number; r: number; s
   fluff: { name: 'Пухляк', hp: 6, r: 17, speed: 50, dmg: 4, wallMul: 1, burn: 1 },
   horn: { name: 'Рогатик', hp: 16, r: 22, speed: 40, dmg: 8, wallMul: 3, burn: 0.7 },
   shade: { name: 'Тінь', hp: 5, r: 15, speed: 78, dmg: 6, wallMul: 0.5, burn: 4 },
-  boss: { name: 'Пан Пухнастий', hp: 200, r: 52, speed: 55, dmg: 12, wallMul: 4, burn: 0.3 },
+  boss: { name: 'Звір Блідого Місяця', hp: 200, r: 52, speed: 55, dmg: 12, wallMul: 4, burn: 0.3 },
 };
 export interface WaveEntry { at: number; kind: EnemyKind; from: string }
 export function waveFor(night: number, hasGrove: boolean): { entries: WaveEntry[]; reward: number; title: string; dirs: string[] } {
@@ -161,5 +161,5 @@ export function waveFor(night: number, hasGrove: boolean): { entries: WaveEntry[
   const boss = night === 4 || (night > 4 && night % 4 === 0);
   if (boss) e.push({ at: 30, kind: 'boss', from: 'E' });
   e.sort((a, b) => a.at - b.at);
-  return { entries: e, reward: 40 + night * 30 + (boss ? 300 : 0), title: boss ? 'Ніч Пана Пухнастого' : `Пухнаста Ніч №${night}`, dirs };
+  return { entries: e, reward: 40 + night * 30 + (boss ? 300 : 0), title: boss ? 'Ніч Звіра Блідого Місяця' : `Ніч №${night}`, dirs };
 }

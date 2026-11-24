@@ -10,13 +10,14 @@ const TAU = Math.PI * 2;
 type Img = Phaser.GameObjects.Image;
 type Txt = Phaser.GameObjects.Text;
 type Ctn = Phaser.GameObjects.Container;
-const FONT = 'Nunito, system-ui, sans-serif';
+const FONT = '"PT Serif", Georgia, serif';
+const REDUCED = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 export interface Ghost { type: BuildingType; x: number; y: number; ok: boolean; moving?: string }
 export interface SceneHooks {
   world: () => World; input: Input; running: () => boolean;
   onEvent: (e: GameEvent) => void; onFrame: (dt: number) => void;
-  build: () => { active: boolean; ghost: Ghost | null; selected: string | null };
+  build: () => { active: boolean; ghost: Ghost | null; selected: string | null; why?: string };
 }
 interface CharView { root: Ctn; body: Img; legL: Img; legR: Img; tail?: Img; cape?: Img; scarf?: Img; tool?: Img; stack: Ctn; stackImgs: Img[]; key: string; sway: number; swayV: number; bubble?: Txt; toolKey?: string }
 interface Particle { img: Img; x: number; y: number; z: number; vx: number; vy: number; vz: number; life: number; max: number; grav: number; spin: number; drag: boolean; grow: number; alpha: number }
@@ -39,7 +40,7 @@ export class WorldScene extends Phaser.Scene {
   townG!: Phaser.GameObjects.Graphics; hedgeG!: Phaser.GameObjects.Graphics; groveG!: Phaser.GameObjects.Graphics;
   townLevel = 0; hedgeDone = false;
   tele!: Img; teleIn!: Img; dirArrows: Img[] = [];
-  ghostImg!: Img; ghostG!: Phaser.GameObjects.Graphics; selG!: Phaser.GameObjects.Graphics;
+  ghostImg!: Img; ghostG!: Phaser.GameObjects.Graphics; selG!: Phaser.GameObjects.Graphics; ghostTxt!: Txt;
   light!: Phaser.Textures.CanvasTexture; lightImg!: Img; vignette!: Img; tint!: Phaser.GameObjects.Rectangle;
   glows: Img[] = []; falls: { img: Img; t: number; dir: number }[] = [];
   owl!: Img;
@@ -60,6 +61,7 @@ export class WorldScene extends Phaser.Scene {
     this.ghostG = this.add.graphics().setDepth(8500);
     this.selG = this.add.graphics().setDepth(8499);
     this.ghostImg = img(this, 'site').setDepth(8501).setVisible(false).setAlpha(0.7);
+    this.ghostTxt = this.mkText(0, 0, '', 12, '#e8c8a0', 'box').setDepth(8502).setVisible(false);
     this.owl = img(this, 'npc_owl').setDepth(0);
     const cw = Math.max(64, Math.ceil(this.scale.width / 4)), ch = Math.max(64, Math.ceil(this.scale.height / 4));
     this.light = this.textures.createCanvas('light', cw, ch)!;
@@ -67,14 +69,26 @@ export class WorldScene extends Phaser.Scene {
     this.tint = this.add.rectangle(0, 0, 10, 10, 0xff7a3c, 0).setDepth(6990);
     this.vignette = img(this, 'fx_vignette').setDepth(7001);
     const cam = this.cameras.main;
-    cam.setBounds(0, 0, W, H); cam.setBackgroundColor('#2f4a4a');
+    cam.setBounds(0, 0, W, H); cam.setBackgroundColor('#141716');
     this.fitCamera(); cam.centerOn(this.w.hero.x, this.w.hero.y);
     this.scale.on('resize', () => this.fitCamera());
   }
   fitCamera() {
-    this.cameras.main.setZoom(Math.min(this.scale.height / 660, this.scale.width / 520));
+    const narrow = this.scale.width < this.scale.height;
+    this.cameras.main.setZoom(Math.min(this.scale.height / 660, this.scale.width / (narrow ? 400 : 520)));
     const cw = Math.max(64, Math.ceil(this.scale.width / 4)), ch = Math.max(64, Math.ceil(this.scale.height / 4));
     if (this.light && (this.light.width !== cw || this.light.height !== ch)) this.light.setSize(cw, ch);
+  }
+  private thumbs = new Map<string, string>();
+  /** Data URL of a sprite from the atlas, for HTML icons. */
+  thumb(key: string, maxH = 64): string {
+    const ck = key + '@' + maxH; const hit = this.thumbs.get(ck); if (hit) return hit;
+    const m = ART[key]; if (!m) return '';
+    const fr = this.textures.getFrame(m.atlas, key); const src = fr.source.image as CanvasImageSource;
+    const k = Math.min(1, maxH * 2 / fr.cutHeight), cv = document.createElement('canvas');
+    cv.width = Math.max(1, Math.round(fr.cutWidth * k)); cv.height = Math.max(1, Math.round(fr.cutHeight * k));
+    cv.getContext('2d')!.drawImage(src, fr.cutX, fr.cutY, fr.cutWidth, fr.cutHeight, 0, 0, cv.width, cv.height);
+    const url = cv.toDataURL(); this.thumbs.set(ck, url); return url;
   }
   screenToWorld(x: number, y: number) { const p = this.cameras.main.getWorldPoint(x, y); return { x: p.x, y: p.y }; }
   panBy(dx: number, dy: number) { const cam = this.cameras.main; this.camFollow = false; cam.centerOn(cam.midPoint.x - dx / cam.zoom, cam.midPoint.y - dy / cam.zoom); }
@@ -95,12 +109,12 @@ export class WorldScene extends Phaser.Scene {
   drawGround() {
     this.add.tileSprite(0, 0, W, H, 'grass_tile').setOrigin(0).setTileScale(1 / TEX).setDepth(0);
     const g = this.add.graphics().setDepth(0);
-    g.fillStyle(0x4f7f56, 0.35).fillRoundedRect(EDGE.x - 40, EDGE.y - 40, EDGE.w + 60, EDGE.h + 70, 70);
-    g.fillStyle(0x7a6c9a, 0.85).fillRoundedRect(WILDS.x - 30, 50, W - WILDS.x + 60, H - 70, 90);
-    g.fillStyle(0x9a9078, 0.45).fillRoundedRect(HILLS.x - 40, HILLS.y - 60, HILLS.w + 80, HILLS.h + 80, 80);
-    g.fillStyle(0xa6cf86, 0.35).fillRoundedRect(MEADOW.x - 30, MEADOW.y - 20, MEADOW.w + 60, MEADOW.h + 40, 80);
+    g.fillStyle(0x1e2a22, 0.45).fillRoundedRect(EDGE.x - 40, EDGE.y - 40, EDGE.w + 60, EDGE.h + 70, 70);
+    g.fillStyle(0x2a2430, 0.85).fillRoundedRect(WILDS.x - 30, 50, W - WILDS.x + 60, H - 70, 90);
+    g.fillStyle(0x5a554c, 0.45).fillRoundedRect(HILLS.x - 40, HILLS.y - 60, HILLS.w + 80, HILLS.h + 80, 80);
+    g.fillStyle(0x4e5a40, 0.35).fillRoundedRect(MEADOW.x - 30, MEADOW.y - 20, MEADOW.w + 60, MEADOW.h + 40, 80);
     // dirt roads with soft edges
-    for (const [col, a, wd] of [[0xc9b48c, 0.6, 92], [0xe1cfa9, 1, 72]] as [number, number, number][]) {
+    for (const [col, a, wd] of [[0x3a3228, 0.7, 92], [0x5e5242, 1, 72]] as [number, number, number][]) {
       g.fillStyle(col, a);
       g.fillRoundedRect(HEDGE_X - 30, ROAD_Y - wd / 2, TC.x - HEDGE_X, wd, wd / 2);
       g.fillRoundedRect(TC.x, ROAD_Y - wd / 2, WILDS.x - TC.x + 60, wd, wd / 2);
@@ -110,21 +124,21 @@ export class WorldScene extends Phaser.Scene {
     this.groveG = this.add.graphics().setDepth(0); this.drawGrove();
     this.townG = this.add.graphics().setDepth(0.5);
     this.hedgeG = this.add.graphics().setDepth(5);
-    for (let y = 110; y < H - 40; y += 22) { const k = Math.sin(y * 0.3) * 3; this.hedgeG.fillStyle(y % 44 ? 0x3e6e4e : 0x477a57).fillCircle(HEDGE_X + k, y, 17); this.hedgeG.lineStyle(1.6, 0x24442f).strokeCircle(HEDGE_X + k, y, 17); this.hedgeG.fillStyle(0x6fa06a, 0.6).fillCircle(HEDGE_X + k - 5, y - 6, 5); }
+    for (let y = 110; y < H - 40; y += 22) { const k = Math.sin(y * 0.3) * 3; this.hedgeG.fillStyle(y % 44 ? 0x1f2b22 : 0x26342a).fillCircle(HEDGE_X + k, y, 17); this.hedgeG.lineStyle(1.6, 0x0d0f0c).strokeCircle(HEDGE_X + k, y, 17); this.hedgeG.fillStyle(0x3d4a36, 0.5).fillCircle(HEDGE_X + k - 5, y - 6, 4); }
   }
-  drawGrove() { this.groveG.clear().fillStyle(this.w.flags.hedge ? 0x8a7ab0 : 0x4f5f6e, 0.35).fillRoundedRect(GROVE.x - 40, GROVE.y - 40, GROVE.w + 60, GROVE.h + 70, 60); }
+  drawGrove() { this.groveG.clear().fillStyle(this.w.flags.hedge ? 0x3a3048 : 0x1a1e22, 0.45).fillRoundedRect(GROVE.x - 40, GROVE.y - 40, GROVE.w + 60, GROVE.h + 70, 60); }
   drawTown() {
     const R = townR(this.w), lv = hallLevel(this.w), g = this.townG.clear();
-    g.fillStyle(0xb9a37f).fillCircle(TC.x, TC.y, R + 8);
-    g.fillStyle(lv >= 2 ? 0xd8c9b0 : 0xcdb994).fillCircle(TC.x, TC.y, R);
+    g.fillStyle(0x2b2620).fillCircle(TC.x, TC.y, R + 8);
+    g.fillStyle(lv >= 2 ? 0x55504a : 0x4a443c).fillCircle(TC.x, TC.y, R);
     // cobble rings
     for (let r = 40; r < R - 10; r += 26) {
       const n = Math.floor(TAU * r / 30);
-      for (let i = 0; i < n; i++) { const a = i / n * TAU + (r / 26) * 0.4; g.fillStyle(((i + r) % 3) ? 0xc4ae8a : 0xd2bd98, lv >= 2 ? 0.9 : 0.6).fillRoundedRect(TC.x + Math.cos(a) * r - 11, TC.y + Math.sin(a) * r * 0.92 - 7, 22, 14, 6); }
+      for (let i = 0; i < n; i++) { const a = i / n * TAU + (r / 26) * 0.4; g.fillStyle(((i + r) % 3) ? 0x5e574c : 0x68604f, lv >= 2 ? 0.9 : 0.6).fillRoundedRect(TC.x + Math.cos(a) * r - 11, TC.y + Math.sin(a) * r * 0.92 - 7, 22, 14, 6); }
     }
-    if (lv >= 3) { g.lineStyle(6, 0xb0a0d0, 0.5); for (let i = 0; i < 8; i++) { const a = i / 8 * TAU; g.lineBetween(TC.x, TC.y, TC.x + Math.cos(a) * R, TC.y + Math.sin(a) * R); } }
-    g.lineStyle(3, 0x9a8462, 0.8).strokeCircle(TC.x, TC.y, R + 8);
-    for (let i = 0; i < 24; i++) { const a = i / 24 * TAU; g.fillStyle(0x8e8aa6).fillCircle(TC.x + Math.cos(a) * (R + 8), TC.y + Math.sin(a) * (R + 8), 4); }
+    if (lv >= 3) { g.lineStyle(6, 0x7d6a48, 0.45); for (let i = 0; i < 8; i++) { const a = i / 8 * TAU; g.lineBetween(TC.x, TC.y, TC.x + Math.cos(a) * R, TC.y + Math.sin(a) * R); } }
+    g.lineStyle(3, 0x1a1714, 0.9).strokeCircle(TC.x, TC.y, R + 8);
+    for (let i = 0; i < 24; i++) { const a = i / 24 * TAU; g.fillStyle(0x3b3a36).fillCircle(TC.x + Math.cos(a) * (R + 8), TC.y + Math.sin(a) * (R + 8), 4); }
   }
   makeDecor() {
     let s = 4242; const r = () => { s = (s * 16807) % 2147483647; return (s - 1) / 2147483646; };
@@ -151,8 +165,8 @@ export class WorldScene extends Phaser.Scene {
     const body = img(this, key);
     const v: CharView = { root, body, legL, legR, stack, stackImgs: [], key, sway: 0, swayV: 0 };
     if (isHero) {
-      v.cape = img(this, 'hero_cape', -6, -28); v.scarf = img(this, 'hero_scarf', -4, -28);
-      v.tool = img(this, 'w_axe', 11, -18);
+      v.cape = img(this, 'hero_cape', -5, -54); v.scarf = img(this, 'hero_scarf', -3, -56);
+      v.tool = img(this, 'w_axe', 13, -34);
       root.add([shadow, v.cape, legL, legR, stack, body, v.scarf, v.tool]);
     } else {
       v.tail = img(this, key + '_tail', -7, -6);
@@ -166,7 +180,7 @@ export class WorldScene extends Phaser.Scene {
     v.root.setPosition(e.x, e.y).setDepth(10 + e.y);
     v.root.scaleX += (e.face - v.root.scaleX) * Math.min(1, dt * 18); // smooth turn instead of a hard flip
     const run = e.moving ? Math.sin(e.walkT * 11) : 0;
-    const bob = e.moving ? Math.abs(run) * 3 * s : Math.sin(t * 2.5 + e.x) * 0.8;
+    const bob = e.moving ? Math.abs(run) * 2.2 * s : Math.sin(t * 2 + e.x) * 0.5;
     v.body.y = -bob; v.body.scaleY = (1 + (e.moving ? Math.abs(run) * -0.04 : Math.sin(t * 2.5 + e.x) * 0.02)) / TEX; v.body.scaleX = (1 + (e.moving ? Math.abs(run) * 0.03 : 0)) / TEX;
     v.body.rotation = e.moving ? 0.06 : 0;
     const blink = ((t + e.x * 0.01) % 4.1) < 0.12;
@@ -174,14 +188,14 @@ export class WorldScene extends Phaser.Scene {
     const lp = e.moving ? run * 4 * s : 0;
     v.legL.y = -Math.max(0, lp); v.legR.y = -Math.max(0, -lp);
     if (v.tail) v.tail.rotation = Math.sin(t * 1.6 + e.x) * 0.12 + (e.moving ? 0.25 : 0);
-    if (v.cape) { v.cape.y = -28 - bob; v.cape.rotation = (e.moving ? 0.5 : 0.08) + Math.sin(t * 4 + e.walkT * 6) * 0.08; }
-    if (v.scarf) { v.scarf.y = -28 - bob; v.scarf.rotation = (e.moving ? -0.15 : 0.15) + Math.sin(t * 5 + e.walkT * 8) * 0.12; }
-    if (v.tool) { v.tool.rotation = e.swing > 0 ? -2.1 + 2.9 * (1 - e.swing) : 0.5 + Math.sin(t * 2) * 0.03; v.tool.y = (isHero ? -18 : -12) - bob; }
+    if (v.cape) { v.cape.y = -54 - bob; v.cape.rotation = (e.moving ? 0.32 : 0.05) + Math.sin(t * 3 + e.walkT * 5) * 0.05; }
+    if (v.scarf) { v.scarf.y = -56 - bob; v.scarf.rotation = (e.moving ? -0.15 : 0.15) + Math.sin(t * 5 + e.walkT * 8) * 0.12; }
+    if (v.tool) { v.tool.rotation = e.swing > 0 ? -2.1 + 2.9 * (1 - e.swing) : 0.5 + Math.sin(t * 2) * 0.03; v.tool.y = (isHero ? -34 : -12) - bob; }
     const target = -vx * 0.05 * Math.sign(v.root.scaleX || 1);
     v.swayV += ((target - v.sway) * 60 - v.swayV * 8) * dt; v.sway += v.swayV * dt;
     const hidden = this.pending[owner] || 0, n = Math.max(0, e.stack.length - hidden);
     while (v.stackImgs.length < n) { const i = img(this, 'it_log'); v.stack.add(i); v.stackImgs.push(i); }
-    let y = (isHero ? -24 : -16) - bob;
+    let y = (isHero ? -48 : -18) - bob;
     for (let i = 0; i < v.stackImgs.length; i++) {
       const im = v.stackImgs[i];
       if (i >= n) { im.setVisible(false); continue; }
@@ -262,7 +276,7 @@ export class WorldScene extends Phaser.Scene {
       this.syncChar(v, c, 'c' + c.id, dt, c.moving ? c.face * 60 : 0);
       const idle = !c.hidden && c.idle && !c.moving;
       v.bubble!.setVisible(!!idle).setPosition(c.x, c.y - 62);
-      if (idle && v.bubble!.text !== '💤 ' + c.idle) v.bubble!.setText('💤 ' + c.idle);
+      if (idle && v.bubble!.text !== c.idle) v.bubble!.setText(c.idle);
     }
     for (const [id, v] of this.cats) if (!w.cats.find(c => c.id === id)) { v.root.destroy(); v.bubble?.destroy(); this.cats.delete(id); }
     // units
@@ -271,7 +285,7 @@ export class WorldScene extends Phaser.Scene {
       if (!v) { v = this.makeChar('cat_' + u.kind, false); setArt(v.tool!, u.kind === 'spear' ? 'w_spear' : 'w_sling'); v.bubble = this.mkText(0, 0, '', 12, INK, 'bubble').setDepth(8000); this.units.set(u.id, v); }
       this.syncChar(v, { ...u, stack: [] }, 'u' + u.id, dt, u.moving ? u.face * 60 : 0);
       v.root.setAlpha(u.woundT > 0 ? 0.55 : 1);
-      v.bubble!.setVisible(u.woundT > 0).setPosition(u.x, u.y - 62); if (u.woundT > 0) v.bubble!.setText('🩹 ' + Math.ceil(u.woundT));
+      v.bubble!.setVisible(u.woundT > 0).setPosition(u.x, u.y - 62); if (u.woundT > 0) v.bubble!.setText('поранений · ' + Math.ceil(u.woundT));
     }
     for (const [id, v] of this.units) if (!w.units.find(u => u.id === id)) { v.root.destroy(); v.bubble?.destroy(); this.units.delete(id); }
     // enemies
@@ -345,7 +359,7 @@ export class WorldScene extends Phaser.Scene {
     const wob = working && !b.site ? Math.sin(t * 18) * 0.01 : 0;
     v.main.setPosition(b.x, b.y).setDepth(10 + b.y).setRotation(wob);
     if (!b.site && !this.tweens.isTweening(v.main)) v.main.setScale((1 + (working ? Math.abs(Math.sin(t * 9)) * 0.015 : 0)) / TEX, 1 / TEX);
-    v.slots.forEach(s => s.objs.forEach((o: any, i) => { o.setVisible(!b.site); o.setPosition(b.x + s.dx, b.y + s.dy + (i === 1 ? -6 : i === 2 ? 18 : 0)); }));
+    v.slots.forEach(s => s.objs.forEach((o: any, i) => { o.setVisible(!b.site); o.setPosition(b.x + s.dx, b.y + s.dy + (i === 1 ? -5 : i === 2 ? 12 : 0)); }));
     if (v.blade) { v.blade.setVisible(!b.site).setPosition(b.x + 2, b.y - 96).setDepth(11 + b.y); if (working) v.blade.rotation += dt * (b.spec === 'fast' ? 22 : 11); }
     if (v.flames) {
       const lit = lightRadius(b) > 0, f = def.fuel!, k = lit ? 0.55 + 0.45 * (b.fuel / f.cap) : 0;
@@ -375,8 +389,8 @@ export class WorldScene extends Phaser.Scene {
     }
     // label: site progress, fuel warnings, stars
     let s = '';
-    if (b.site) s = '🔨 ' + Object.entries(b.site).map(([k, n]) => `${n}${ITEMS[k as ItemId].icon}`).join(' ');
-    else if (def.fuel && b.fuel < def.fuel.cap * 0.25) s = b.fuel <= 0 ? '⚠️ Згасло' : '⚠️ Мало палива';
+    if (b.site) s = 'будова · ' + Object.entries(b.site).map(([k, n]) => `${n} ${ITEMS[k as ItemId].name.toLowerCase()}`).join(', ');
+    else if (def.fuel && b.fuel < def.fuel.cap * 0.25) s = b.fuel <= 0 ? 'згасло' : 'мало палива';
     else if (b.type === 'storage') s = `${invTotal(b.store)}/${(def.levels![b.level - 1].stats.cap)}`;
     else if (def.levels && b.level > 1 && b.type !== 'hall') s = '★'.repeat(b.level);
     if (v.label!.text !== s) v.label!.setText(s);
@@ -385,8 +399,8 @@ export class WorldScene extends Phaser.Scene {
     if (!b.site && (b.type === 'palisade' || b.type === 'tower' || def.fuel) && (b.hp < b.maxHp || (def.fuel && w.clock.phase !== 'day'))) {
       const y = b.y - (ART[key]?.oy ?? 60) - (s ? 22 : 8);
       v.hp!.fillStyle(0x2a1030, 0.9).fillRoundedRect(b.x - 20, y, 40, 6, 3);
-      v.hp!.fillStyle(0x8fe3c0).fillRoundedRect(b.x - 20, y, 40 * Math.max(0, b.hp / b.maxHp), 6, 3);
-      if (def.fuel) { v.hp!.fillStyle(0x2a1030, 0.9).fillRoundedRect(b.x - 20, y + 8, 40, 5, 2.5); v.hp!.fillStyle(0xffb84a).fillRoundedRect(b.x - 20, y + 8, 40 * Math.max(0, b.fuel / def.fuel.cap), 5, 2.5); }
+      v.hp!.fillStyle(0x8a9a70).fillRoundedRect(b.x - 20, y, 40 * Math.max(0, b.hp / b.maxHp), 6, 3);
+      if (def.fuel) { v.hp!.fillStyle(0x2a1030, 0.9).fillRoundedRect(b.x - 20, y + 8, 40, 5, 2.5); v.hp!.fillStyle(0xc9883a).fillRoundedRect(b.x - 20, y + 8, 40 * Math.max(0, b.fuel / def.fuel.cap), 5, 2.5); }
     }
   }
   pile(arr: Img[], x: number, y: number, type: ItemId, n: number, by: number) {
@@ -395,21 +409,17 @@ export class WorldScene extends Phaser.Scene {
     arr.forEach((im, i) => { if (i >= shown) { im.setVisible(false); return; } setArt(im, 'it_' + type); const col = i % 4, row = Math.floor(i / 4); im.setVisible(true).setPosition(x + (col - 1.5) * 4 + (row % 2) * 2, y - row * h).setDepth(10 + by + 30); });
   }
   makeSlot(kind: string): Phaser.GameObjects.GameObject[] {
-    const cols: Record<string, number> = { sell: 0xffcf4a, deposit: 0xc7b6ff, in: 0xe7b07a, out: 0xf3d7a6, forge: 0x8fe3c0, bell: 0xff8fa3, fuel: 0xffa25a };
-    const labels: Record<string, string> = { sell: 'ПРОДАТИ', deposit: 'НА СКЛАД', in: 'ВХІД', out: 'ВИХІД', forge: 'КУЗНЯ', bell: 'НІЧ', fuel: 'ПАЛИВО' };
-    const icons: Record<string, string> = { sell: '🪙', deposit: '📦', in: '⬇️', out: '⬆️', forge: '🔨', bell: '🔔', fuel: '🔥' };
-    const g = this.add.graphics().setDepth(1);
-    g.fillStyle(0x2a2140, 0.25).fillRoundedRect(-27, -24, 54, 54, 13);
-    g.fillStyle(cols[kind], 0.9).fillRoundedRect(-27, -27, 54, 54, 13);
-    g.lineStyle(2, 0x2a2140, 0.7).strokeRoundedRect(-27, -27, 54, 54, 13);
-    const icon = this.add.text(0, 0, icons[kind], { fontSize: '20px' }).setOrigin(0.5).setDepth(1);
-    const lbl = this.add.text(0, 0, labels[kind], { fontFamily: FONT, fontSize: '9px', fontStyle: '900', color: INK }).setOrigin(0.5).setDepth(1).setResolution(TEX);
-    return [g, icon, lbl];
+    const labels: Record<string, string> = { sell: 'ПРОДАТИ', deposit: 'НА СКЛАД', in: 'ПРИЙОМ', out: 'ВИДАЧА', forge: 'КУЗНЯ', bell: 'ДЗВІН', fuel: 'ПАЛИВО' };
+    const plate = img(this, 'pad_plate').setDepth(1);
+    const icon = img(this, 'g_' + kind).setDepth(1);
+    const lbl = this.add.text(0, 0, labels[kind], { fontFamily: FONT, fontSize: '8.5px', fontStyle: '700', color: '#c9bfa8' }).setOrigin(0.5).setDepth(1).setResolution(TEX * 1.5);
+    lbl.setLetterSpacing(0.6);
+    return [plate, icon, lbl];
   }
   mkText(x: number, y: number, s: string, size: number, color: string, style: 'stroke' | 'box' | 'bubble' = 'stroke'): Txt {
     const t = this.add.text(x, y, s, { fontFamily: FONT, fontSize: size + 'px', fontStyle: '800', color, align: 'center', stroke: style === 'stroke' ? INK : undefined, strokeThickness: style === 'stroke' ? 4 : 0 }).setOrigin(0.5);
-    if (style === 'box') t.setBackgroundColor('rgba(42,33,64,.82)').setPadding(7, 2, 7, 2);
-    if (style === 'bubble') t.setBackgroundColor('#fff8ea').setPadding(6, 3, 6, 3);
+    if (style === 'box') t.setBackgroundColor('rgba(20,17,15,.85)').setPadding(7, 2, 7, 2);
+    if (style === 'bubble') t.setBackgroundColor('#c9bfa8').setPadding(6, 3, 6, 3);
     return t.setResolution(TEX);
   }
 
@@ -417,21 +427,22 @@ export class WorldScene extends Phaser.Scene {
   updateBuildUi() {
     const st = this.hooks.build(), w = this.w;
     this.ghostG.clear(); this.selG.clear();
-    if (!st.active) { this.ghostImg.setVisible(false); return; }
+    if (!st.active) { this.ghostImg.setVisible(false); this.ghostTxt.setVisible(false); return; }
     const R = townR(w);
-    this.ghostG.lineStyle(3, 0xffcf4a, 0.5).strokeCircle(TC.x, TC.y, R);
-    this.ghostG.lineStyle(2, 0xff8fa3, 0.3).strokeCircle(TC.x, TC.y, R + 260);
-    if (st.selected) { const b = w.buildings[st.selected]; if (b) this.selG.lineStyle(3, 0x8fe3c0, 0.9).strokeEllipse(b.x, b.y, (BUILD[b.type].r + 14) * 2, (BUILD[b.type].r + 14) * 1.1); }
+    this.ghostG.lineStyle(3, 0xb08a3e, 0.55).strokeCircle(TC.x, TC.y, R);
+    this.ghostG.lineStyle(2, 0x7d2a22, 0.4).strokeCircle(TC.x, TC.y, R + 260);
+    if (st.selected) { const b = w.buildings[st.selected]; if (b) this.selG.lineStyle(3, 0xb08a3e, 0.9).strokeEllipse(b.x, b.y, (BUILD[b.type].r + 14) * 2, (BUILD[b.type].r + 14) * 1.1); }
     const g = st.ghost;
-    if (!g) { this.ghostImg.setVisible(false); return; }
+    if (!g) { this.ghostImg.setVisible(false); this.ghostTxt.setVisible(false); return; }
     const def = BUILD[g.type], r = def.r;
-    this.ghostG.fillStyle(g.ok ? 0x8fe3c0 : 0xff5470, 0.28).fillEllipse(g.x, g.y, r * 2.4, r * 1.3);
-    this.ghostG.lineStyle(2, g.ok ? 0x8fe3c0 : 0xff5470, 0.9).strokeEllipse(g.x, g.y, r * 2.4, r * 1.3);
+    this.ghostG.fillStyle(g.ok ? 0x8a9a70 : 0x9a2a22, 0.3).fillEllipse(g.x, g.y, r * 2.4, r * 1.3);
+    this.ghostG.lineStyle(2, g.ok ? 0xb08a3e : 0xc0432f, 0.95).strokeEllipse(g.x, g.y, r * 2.4, r * 1.3);
+    const why = st.why || ''; this.ghostTxt.setVisible(!!why).setPosition(g.x, g.y + r * 0.8 + 18); if (this.ghostTxt.text !== why) this.ghostTxt.setText(why);
     if (def.fuel) this.ghostG.lineStyle(1.5, 0xffcf4a, 0.5).strokeCircle(g.x, g.y, def.fuel.radius);
     if (g.type === 'tower') this.ghostG.lineStyle(1.5, 0xff8fa3, 0.5).strokeCircle(g.x, g.y, 190);
     const key = g.moving ? this.keyFor(w.buildings[g.moving]) : this.keyFor({ type: g.type, level: 1, site: null, fuel: 1, hp: 1 } as any);
     setArt(this.ghostImg, key in ART ? key : 'site');
-    this.ghostImg.setVisible(true).setPosition(g.x, g.y).setAlpha(0.65 + Math.sin(this.elapsed * 6) * 0.1).setTint(g.ok ? 0xffffff : 0xff8a8a);
+    this.ghostImg.setVisible(true).setPosition(g.x, g.y).setAlpha(0.7).setTint(g.ok ? 0xffffff : 0xd08070);
   }
 
   // ---------------------------------------------------------------- events -> fx
@@ -465,15 +476,15 @@ export class WorldScene extends Phaser.Scene {
         if (dist(w.hero.x, w.hero.y, e.x, e.y) < 120) { sfx('fall'); this.shakeAmt = Math.max(this.shakeAmt, 2); }
         break;
       }
-      case 'hit': this.burst(e.x, e.y, 5, 0xc7a6ff, 'fx_dot', 140, 0.5, 0.5, 200, true); this.floatText(e.x, e.y - 18, '-' + Math.round((e.v || 0) * 10) / 10, '#ffd1dc', 14); sfx('hit'); break;
-      case 'poof': this.burst(e.x, e.y, e.kind === 'boss' ? 70 : 18, e.kind === 'light' ? 0xffc35a : 0xb9a3e8, 'fx_dot', e.kind === 'boss' ? 320 : 200, 0.9, 0.9, 120, true); this.burst(e.x, e.y, 8, 0xffcf4a, 'fx_star', 160, 0.8, 0.6, 200); sfx('poof'); if (e.kind === 'boss') this.shakeAmt = 12; break;
+      case 'hit': this.burst(e.x, e.y, 5, 0x5a5060, 'fx_dot', 140, 0.5, 0.5, 200, true); this.floatText(e.x, e.y - 18, '-' + Math.round((e.v || 0) * 10) / 10, '#d9a080', 13); sfx('hit'); break;
+      case 'poof': this.burst(e.x, e.y, e.kind === 'boss' ? 60 : 16, e.kind === 'light' ? 0xd0702a : 0x4a4250, 'fx_dot', e.kind === 'boss' ? 300 : 180, 0.9, 0.9, 120, true); this.burst(e.x, e.y, 6, 0xb08a3e, 'fx_star', 140, 0.7, 0.45, 200); sfx('poof'); if (e.kind === 'boss') this.shakeAmt = 12; break;
       case 'placed': this.burst(e.x, e.y, 10, 0xe1cfa9, 'fx_puff', 90, 0.6, 0.6, 0); sfx('drop'); break;
       case 'build': case 'upgrade':
-        this.burst(e.x, e.y, e.t === 'build' ? 36 : 20, 0xffcf4a, 'fx_star', 220, 1, 0.7, 300); this.burst(e.x, e.y, 16, 0xe9667a, 'fx_dot', 200, 1, 0.5, 300); this.burst(e.x, e.y, 8, 0xffffff, 'fx_puff', 120, 0.8, 1.2, 0);
+        this.burst(e.x, e.y, e.t === 'build' ? 22 : 12, 0xb08a3e, 'fx_star', 160, 0.9, 0.45, 260); this.burst(e.x, e.y, 6, 0x8a8272, 'fx_puff', 90, 0.9, 0.9, 0);
         sfx(e.t === 'build' ? 'build' : 'upg'); this.shakeAmt = Math.max(this.shakeAmt, e.t === 'build' ? 4 : 2); break;
-      case 'hurt': this.burst(e.x, e.y, 8, 0xff8fa3, 'fx_dot', 150, 0.5, 0.5, 300); sfx('hurt'); if (e.kind !== 'unit') this.shakeAmt = Math.max(this.shakeAmt, 5); break;
+      case 'hurt': this.burst(e.x, e.y, 8, 0x7d2a22, 'fx_dot', 150, 0.5, 0.5, 300); sfx('hurt'); if (e.kind !== 'unit') this.shakeAmt = Math.max(this.shakeAmt, 5); break;
       case 'slam': this.burst(e.x, e.y, 30, 0x9d8cc4, 'fx_puff', 280, 0.8, 1, 0); this.ring(e.x, e.y); sfx('slam'); this.shakeAmt = 12; break;
-      case 'coin': this.floatText(e.x, e.y, '+' + e.v, '#ffcf4a', 16 + Math.min(16, (e.v || 1))); sfx('coin'); break;
+      case 'coin': this.floatText(e.x, e.y, '+' + e.v, '#d9b25a', 15 + Math.min(14, (e.v || 1))); sfx('coin'); break;
       case 'pick': sfx('pick'); break;
       case 'drop': sfx('drop'); break;
       case 'pay': sfx('pay'); break;
@@ -494,9 +505,10 @@ export class WorldScene extends Phaser.Scene {
   }
   stackTop(e: { x: number; y: number; face: number; stack: ItemId[] }, isHero: boolean) {
     let h = 0; for (const it of e.stack) h += ITEMS[it].h;
-    return { x: e.x - e.face * (isHero ? 9 : 7), y: e.y, z: (isHero ? 34 : 24) + h };
+    return { x: e.x - e.face * (isHero ? 9 : 7), y: e.y, z: (isHero ? 58 : 26) + h };
   }
   burst(x: number, y: number, n: number, color: number, key: string, spd: number, life: number, size: number, grav: number, drag = false) {
+    n = Math.ceil(n * (REDUCED ? 0.25 : 0.6));
     for (let i = 0; i < n; i++) {
       if (this.parts.length > 450) break;
       const a = Math.random() * TAU, s = (0.3 + Math.random() * 0.7) * spd;
@@ -541,13 +553,13 @@ export class WorldScene extends Phaser.Scene {
   }
   ambient(dt: number) {
     const w = this.w, v = this.cameras.main.worldView, dark = w.clock.dark;
-    if (dark > 0.25 && Math.random() < dt * 5) { const x = v.x + Math.random() * v.width, y = v.y + Math.random() * v.height; this.burst(x, y, 1, 0xf7ff9e, 'fx_dot', 12, 3, 0.25, 0, true); }
-    if (dark < 0.4 && Math.random() < dt * 2) { const x = v.x + Math.random() * v.width, y = v.y + Math.random() * v.height; if (x < EDGE.x + EDGE.w + 100) this.burst(x, y - 60, 1, 0x7fc47c, 'fx_leaf', 30, 2.5, 0.45, 15, true); }
-    if (Math.random() < dt * 3) { const x = v.x + Math.random() * v.width, y = v.y + Math.random() * v.height; if (x > WILDS.x) { this.puff(x, y, 0xffffff); } }
+    if (dark > 0.25 && Math.random() < dt * 5) { const x = v.x + Math.random() * v.width, y = v.y + Math.random() * v.height; this.burst(x, y, 1, 0xd9b25a, 'fx_dot', 12, 3, 0.22, 0, true); }
+    if (dark < 0.4 && Math.random() < dt * 2) { const x = v.x + Math.random() * v.width, y = v.y + Math.random() * v.height; if (x < EDGE.x + EDGE.w + 100) this.burst(x, y - 60, 1, 0x5a5a3a, 'fx_leaf', 30, 2.5, 0.45, 15, true); }
+    if (Math.random() < dt * 3) { const x = v.x + Math.random() * v.width, y = v.y + Math.random() * v.height; if (x > WILDS.x || Math.random() < 0.25) { this.puff(x, y, 0x8a8a90); } }
   }
   updateCamera(dt: number) {
     const cam = this.cameras.main, h = this.w.hero;
-    this.shakeAmt = Math.max(0, this.shakeAmt - dt * 18);
+    this.shakeAmt = REDUCED ? 0 : Math.max(0, Math.min(this.shakeAmt, 7) - dt * 18);
     if (!this.camFollow) { if (this.shakeAmt > 0) cam.centerOn(cam.midPoint.x + (Math.random() - 0.5) * this.shakeAmt, cam.midPoint.y); return; }
     const tx = h.x + h.vx * 0.25, ty = h.y - 20 + h.vy * 0.2;
     const cx = cam.midPoint.x + (tx - cam.midPoint.x) * Math.min(1, dt * 5), cy = cam.midPoint.y + (ty - cam.midPoint.y) * Math.min(1, dt * 5);
@@ -555,23 +567,24 @@ export class WorldScene extends Phaser.Scene {
   }
   updateLight() {
     const w = this.w, v = this.cameras.main.worldView;
-    const dark = w.clock.dark * 0.6;
-    this.vignette.setPosition(v.centerX, v.centerY).setDisplaySize(v.width * 1.05, v.height * 1.05).setAlpha(0.55 + dark * 0.6);
+    const dark = 0.16 + w.clock.dark * 0.62;
+    this.vignette.setPosition(v.centerX, v.centerY).setDisplaySize(v.width * 1.05, v.height * 1.05).setAlpha(0.8);
     const dusk = w.clock.phase === 'dusk' ? Math.sin(Math.min(1, w.clock.t / 25) * Math.PI) * 0.18 : 0;
-    this.tint.setPosition(v.centerX, v.centerY).setSize(v.width, v.height).setOrigin(0.5).setFillStyle(0xff7a3c, dusk);
+    this.tint.setPosition(v.centerX, v.centerY).setSize(v.width, v.height).setOrigin(0.5).setFillStyle(0x7d2a22, dusk);
     const lit = Object.values(w.buildings).filter(b => lightRadius(b) > 0);
-    while (this.glows.length < lit.length + 2) this.glows.push(img(this, 'fx_glow').setTint(0xffbe5a).setBlendMode(Phaser.BlendModes.ADD).setDepth(6999));
-    this.glows.forEach((g, i) => { const b = lit[i]; if (!b || dark < 0.02) { g.setVisible(false); return; } const big = lightRadius(b) / 60; g.setVisible(true).setPosition(b.x, b.y - (b.type === 'lantern' ? 70 : 12)).setScale(big * (0.95 + Math.sin(this.elapsed * 8 + i) * 0.04) / TEX).setAlpha(dark * 0.75); });
+    while (this.glows.length < lit.length + 2) this.glows.push(img(this, 'fx_glow').setTint(0xd98a3a).setBlendMode(Phaser.BlendModes.ADD).setDepth(6999));
+    this.glows.forEach((g, i) => { const b = lit[i]; if (!b || dark < 0.02) { g.setVisible(false); return; } const big = lightRadius(b) / 60; g.setVisible(true).setPosition(b.x, b.y - (b.type === 'lantern' ? 72 : 12)).setScale(big * (0.95 + Math.sin(this.elapsed * 8 + i) * 0.04) / TEX).setAlpha(Math.max(0, dark - 0.1) * 0.8); });
     if (dark < 0.02) { this.lightImg.setVisible(false); return; }
     const c = this.light.getContext(), lw = this.light.width, lh = this.light.height;
     c.globalCompositeOperation = 'source-over'; c.clearRect(0, 0, lw, lh);
-    c.fillStyle = `rgba(20,12,52,${dark})`; c.fillRect(0, 0, lw, lh);
+    c.fillStyle = `rgba(10,9,14,${dark})`; c.fillRect(0, 0, lw, lh);
     c.globalCompositeOperation = 'destination-out';
     const L: [number, number, number][] = lit.map(b => [b.x, b.y - 30, lightRadius(b) + Math.sin(this.elapsed * 7 + b.x) * 4]);
     L.push([w.hero.x, w.hero.y - 20, 110]);
     for (const b of Object.values(w.buildings)) if (!b.site && (b.type === 'forge' || b.type === 'candleShop' || b.type.startsWith('house') || b.type === 'hall' || b.type === 'barracks')) L.push([b.x, b.y - 30, 70]);
     for (const [x, y, r] of L) {
       const sx = (x - v.x) / v.width * lw, sy = (y - v.y) / v.height * lh, sr = r / v.width * lw;
+      if (!Number.isFinite(sx + sy + sr) || sr <= 0) continue;
       if (sx < -sr || sy < -sr || sx > lw + sr || sy > lh + sr) continue;
       const g = c.createRadialGradient(sx, sy, sr * 0.2, sx, sy, sr); g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(1, 'rgba(0,0,0,0)');
       c.fillStyle = g; c.fillRect(sx - sr, sy - sr, sr * 2, sr * 2);

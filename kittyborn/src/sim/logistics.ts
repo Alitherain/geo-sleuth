@@ -113,7 +113,7 @@ export function syncCats(w: World) {
     const have = w.cats.filter(c => c.home === b.id).length;
     for (let i = have; i < want; i++) {
       w.cats.push({ id: w.nextId++, role, home: b.id, x: b.x, y: b.y + 30, face: 1, walkT: 0, moving: false, stack: [], task: null, idle: '', swingT: 0, swing: 0, waitT: 0, stuckT: 0, lx: b.x, ly: b.y, hidden: false });
-      w.events.push({ t: 'bubble', who: w.cats[w.cats.length - 1].id, s: 'Мяу. Я на зміні.' });
+      if (Math.random() < 0.4) w.events.push({ t: 'bubble', who: w.cats[w.cats.length - 1].id, s: 'На зміні.' });
     }
   }
 }

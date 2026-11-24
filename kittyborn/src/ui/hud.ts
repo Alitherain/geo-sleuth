@@ -6,15 +6,21 @@ import { exportCode, importCode } from '../sim/save';
 import { comfort, count, dist, has, hallLevel, heroCap, heroMaxHp, invGet, invTotal, levelStats, procStats, reqMet, storageCap, type Building, type GameEvent, type World } from '../sim/world';
 import type { Ghost, WorldScene } from '../render/WorldScene';
 import { audio, audioInit, setMusic, setSound, sfx } from '../platform/audio';
+import { G } from './glyphs';
 import { clearSave, saveSettings } from '../platform/storage';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
-const ico = (k: string) => k === 'coins' ? '🪙' : ITEMS[k as ItemId]?.icon ?? '';
-const costLine = (c: Cost) => (Object.entries(c) as [string, number][]).filter(([, n]) => n).map(([k, n]) => `${ico(k)}${n}`).join(' ') || 'безкоштовно';
+let THUMB: (key: string) => string = () => '';
+const pic = (key: string, cls = 'ico') => { const u = THUMB(key); return u ? `<img class="${cls}" src="${u}" alt="">` : ''; };
+const ico = (k: string) => pic(k === 'coins' ? 'it_coin' : 'it_' + k);
+const costLine = (c: Cost) => (Object.entries(c) as [string, number][]).filter(([, n]) => n).map(([k, n]) => `<span class="cost">${ico(k)}${n}</span>`).join(' ') || 'безкоштовно';
+const BKEY: Partial<Record<string, string>> = { hall: 'bd_hall1', houseGatherer: 'bd_house_gatherer', houseQuarry: 'bd_house_quarry', houseForager: 'bd_house_forager', houseHauler: 'bd_house_hauler', houseMaster: 'bd_house_master', palisade: 'bd_pal', post: 'bd_post', ledLamp: 'bd_lantern_off', shop: 'bd_shop' };
+const bIcon = (t: string, cls = 'ico') => pic(BKEY[t] || 'bd_' + t, cls);
+const UPG_ICON: Record<string, string> = { bag: G.bag, axe: '', boots: '', heart: G.defense, mint: G.decor };
 const TUT: { text: string; done: (w: World) => boolean }[] = [
   { text: 'Підійди до дерева: сокира рубає сама', done: w => w.stats.felled > 0 },
   { text: 'Продай дрова Пані Сові на жовтому майданчику', done: w => w.stats.earned >= 6 },
-  { text: 'Натисни 🔨 → Котики і постав Хатку лісорубів', done: w => has(w, 'houseGatherer') },
+  { text: 'Відкрий будівництво → Котики і постав Хатку лісорубів', done: w => has(w, 'houseGatherer') },
   { text: 'Постав Лісопилку: дошки потрібні для всього', done: w => has(w, 'sawmill') },
   { text: 'Постав Костер: світло обпікає нічних звірів', done: w => has(w, 'bonfire') },
   { text: 'Огороди містечко частоколом перед першою ніччю', done: w => count(w, 'palisade') >= 3 },
@@ -24,11 +30,12 @@ export class Hud {
   input: Input = { x: 0, y: 0 };
   started = false; paused = false;
   scene: WorldScene | null = null;
-  build = { active: false, ghost: null as Ghost | null, selected: null as string | null, cat: 'eco' as Category };
+  build = { active: false, ghost: null as Ghost | null, selected: null as string | null, cat: 'eco' as Category, why: '' };
   private cardFor: string | null = null; private cardSig = ''; private chipFor: string | null = null;
   private toastT = 0; private shown = { coins: -1, bag: '', hp: '', clock: '', tut: '' };
   private joy = { on: false, id: -1, ox: 0, oy: 0, sx: 0, sy: 0, moved: false };
   private keys: Record<string, boolean> = {};
+  private armDemolish: string | null = null;
 
   constructor(private getWorld: () => World, private setWorld: (w: World) => void) {
     this.bindPointer(); this.bindButtons();
@@ -81,7 +88,8 @@ export class Hud {
     const fs = $('bFull');
     if (!(document.fullscreenEnabled || (document as any).webkitFullscreenEnabled)) fs.hidden = true;
     fs.onclick = () => { try { const d: any = document; if (d.fullscreenElement || d.webkitFullscreenElement) (d.exitFullscreen || d.webkitExitFullscreen).call(d); else { const el: any = document.documentElement; (el.requestFullscreen || el.webkitRequestFullscreen)?.call(el)?.catch?.(() => {}); } } catch { /* ignore */ } };
-    const snd = $('bSnd'); const sndIcon = () => { snd.textContent = audio.sound ? '🔊' : '🔇'; }; sndIcon();
+    const snd = $('bSnd'); const sndIcon = () => { snd.innerHTML = audio.sound ? G.sound : G.mute; }; sndIcon();
+    $('bBuild').innerHTML = G.build; $('bFull').innerHTML = G.full; $('bMenu').innerHTML = G.menu; $('bCancel').innerHTML = G.close;
     snd.onclick = () => { audioInit(); setSound(!audio.sound); saveSettings(audio); sndIcon(); };
     $('bMenu').onclick = () => this.toggleMenu();
     $('bBuild').onclick = () => (this.build.active ? this.exitBuild() : this.enterBuild());
@@ -125,22 +133,24 @@ export class Hud {
 
   // ---------------------------------------------------------------- per frame
   frame(dt: number) {
+    if (this.scene) { const sc = this.scene; THUMB = k => sc.thumb(k, 28); }
     if (!this.started) return;
     this.readKeys();
     const w = this.w;
     if (this.toastT > 0) { this.toastT -= dt; if (this.toastT <= 0) $('toast').classList.remove('on'); }
     if (this.shown.coins !== w.coins) { this.shown.coins = w.coins; $('coinN').textContent = w.coins.toLocaleString('uk-UA'); const c = $('coins'); c.classList.remove('bump'); void c.offsetWidth; c.classList.add('bump'); }
     const bag = `${w.hero.stack.length}/${heroCap(w)}`; if (bag !== this.shown.bag) { this.shown.bag = bag; $('bagN').textContent = bag; }
-    const hp = w.clock.phase === 'night' || w.hero.hp < heroMaxHp(w) ? '❤️'.repeat(Math.max(0, w.hero.hp)) + '🤍'.repeat(Math.max(0, heroMaxHp(w) - Math.max(0, w.hero.hp))) : '';
-    if (hp !== this.shown.hp) { this.shown.hp = hp; $('hearts').hidden = !hp; $('hearts').textContent = hp; }
+    const showHp = w.clock.phase === 'night' || w.hero.hp < heroMaxHp(w);
+    const hp = showHp ? Array.from({ length: heroMaxHp(w) }, (_, i) => `<i class="${i < w.hero.hp ? 'on' : ''}"></i>`).join('') : '';
+    if (hp !== this.shown.hp) { this.shown.hp = hp; $('hearts').hidden = !hp; $('hearts').innerHTML = hp; }
     const boss = w.enemies.find(e => e.boss); if (boss) $<HTMLDivElement>('bossF').style.width = Math.max(0, boss.hp / boss.maxHp * 100) + '%';
     document.body.classList.toggle('night', w.clock.phase !== 'day');
     // clock pill
     let clock = '';
-    if (w.clock.phase === 'day') { const s = Math.ceil(secondsToDusk(w)); clock = `☀️ День ${w.clock.day} · сутінки за ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }
-    else if (w.clock.phase === 'dusk') clock = `🌆 Сутінки · ${Math.ceil(25 - w.clock.t)} с`;
-    else clock = `🌙 ${w.clock.title} · звірів ${w.enemies.filter(e => !e.passive).length + w.clock.queue.length} · світла ${litLights(w).length}`;
-    if (clock !== this.shown.clock) { this.shown.clock = clock; $('clock').textContent = clock; }
+    if (w.clock.phase === 'day') { const s = Math.ceil(secondsToDusk(w)); clock = `${G.sun}<b>День ${w.clock.day}</b><span>сутінки ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}</span>`; }
+    else if (w.clock.phase === 'dusk') clock = `${G.dusk}<b>Сутінки</b><span>${Math.ceil(25 - w.clock.t)} с</span>`;
+    else clock = `${G.moon}<b>Ніч ${w.clock.n + 1}</b><span>${G.beast}${w.enemies.filter(e => !e.passive).length + w.clock.queue.length}</span><span>${G.fire}${litLights(w).length}</span>`;
+    if (clock !== this.shown.clock) { this.shown.clock = clock; $('clock').innerHTML = clock; }
     // tutorial chip: short-lived and always derived from the current state
     let tut = '';
     if (!w.flags.tutDone) { const i = TUT.findIndex(s => !s.done(w)); if (i < 0) w.flags.tutDone = true; else tut = `${i + 1}/${TUT.length} · ${TUT[i].text}`; }
@@ -148,7 +158,7 @@ export class Hud {
     // info chip near a building (cards open only on tap)
     const nb = this.build.active ? null : nearBuilding(w);
     const chipId = nb?.id ?? null;
-    if (chipId !== this.chipFor) { this.chipFor = chipId; const el = $('chip'); el.hidden = !nb; if (nb) el.innerHTML = `<span>${BUILD[nb.type].icon}</span> ${BUILD[nb.type].name}${nb.site ? ' (будова)' : ''}`; }
+    if (chipId !== this.chipFor) { this.chipFor = chipId; const el = $('chip'); el.hidden = !nb; if (nb) el.innerHTML = `${bIcon(nb.type, 'ico big')}<span>${BUILD[nb.type].name}${nb.site ? ' · будова' : ''}</span>`; }
     if (this.cardFor) {
       const b = w.buildings[this.cardFor];
       if (!b || (!this.build.active && dist(w.hero.x, w.hero.y, b.x, b.y) > BUILD[b.type].r + 140)) this.closeCard();
@@ -161,7 +171,7 @@ export class Hud {
   openCard(id: string) { this.cardFor = id; this.cardSig = ''; this.renderCard(true); $('card').classList.add('on'); sfx('pick'); }
   closeCard() { this.cardFor = null; this.cardSig = ''; $('card').classList.remove('on'); }
   private h(tag: string, cls = '', text = ''): HTMLElement { const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e; }
-  private row(a: string, b: string, ok = true) { const r = this.h('div', 'row' + (ok ? ' ok' : '')); r.append(this.h('span', '', a), this.h('b', '', b)); return r; }
+  private row(a: string, b: string, ok = true) { const r = this.h('div', 'row' + (ok ? ' ok' : '')); const sa = this.h('span'); sa.innerHTML = a; const sb = this.h('b'); sb.innerHTML = b; r.append(sa, sb); return r; }
   private btn(label: string, cost: Cost | null, onClick: () => boolean, disabled = false, cls = 'ubtn') {
     const b = this.h('button', cls) as HTMLButtonElement;
     b.innerHTML = `<span>${label}</span>${cost ? `<small>${costLine(cost)}</small>` : ''}`;
@@ -176,13 +186,13 @@ export class Hud {
     this.cardSig = sig;
     const el = $('card'); el.innerHTML = '';
     const def = BUILD[b.type];
-    const close = this.h('button', 'x', '✕'); close.onclick = () => this.closeCard(); el.append(close);
+    const close = this.h('button', 'x'); close.innerHTML = G.close; close.setAttribute('aria-label', 'Закрити'); close.onclick = () => this.closeCard(); el.append(close);
     const stars = def.levels && !b.site ? ' ' + '★'.repeat(b.level) + '☆'.repeat(def.levels.length - b.level) : '';
-    el.append(this.h('h2', '', `${def.icon} ${def.name}${stars}`));
+    const h2 = this.h('h2'); h2.innerHTML = `${bIcon(b.type, 'ico big')}<span>${def.name}<small>${stars}</small></span>`; el.append(h2);
     if (b.site) {
       el.append(this.h('p', 'sub', 'Будується'));
       const rows = this.h('div', 'rows');
-      for (const [k, n] of Object.entries(b.site) as [ItemId, number][]) rows.append(this.row(`${ITEMS[k].icon} ${ITEMS[k].name}`, `ще ${n}${invGet(b.incoming, k) ? ` (везуть ${invGet(b.incoming, k)})` : ''}`, false));
+      for (const [k, n] of Object.entries(b.site) as [ItemId, number][]) rows.append(this.row(`${ico(k)} ${ITEMS[k].name}`, `ще ${n}${invGet(b.incoming, k) ? ` (везуть ${invGet(b.incoming, k)})` : ''}`, false));
       const needHouse = ([['stone', 'houseQuarry'], ['berry', 'houseForager'], ['lav', 'houseGatherer']] as const).find(([k, t]) => b.site![k as ItemId] && !has(w, t) && !(k === 'lav' && !w.flags.hedge));
       if (needHouse) el.append(this.h('p', 'tip warn', `Ніхто не збирає ${ITEMS[needHouse[0] as ItemId].name.toLowerCase()}: постав «${BUILD[needHouse[1]].name}» (🔨 → Котики) або збери сам.`));
       if (b.site.lav && !w.flags.hedge) el.append(this.h('p', 'tip warn', 'Лавандова деревина росте за хащами: розчисти їх у картці Ратуші.'));
@@ -196,30 +206,31 @@ export class Hud {
     }
     if (this.build.active && !def.noBuild) {
       const r = this.h('div', 'mrow');
-      r.append(this.btn('↔️ Перемістити', null, () => { this.build.ghost = { type: b.type, x: b.x, y: b.y, ok: true, moving: b.id }; this.closeCard(); this.renderDrawer(); return false; }, false, 'ubtn ghost'));
-      r.append(this.btn('🗑️ Знести (+50% монет)', null, () => { demolish(w, b); this.closeCard(); return false; }, false, 'ubtn ghost'));
+      r.append(this.btn(`${G.move} Перемістити`, null, () => { this.build.ghost = { type: b.type, x: b.x, y: b.y, ok: true, moving: b.id }; this.closeCard(); this.renderDrawer(); return false; }, false, 'ubtn ghost'));
+      const dz = this.btn(`${G.trash} Знести`, null, () => { if (this.armDemolish !== b.id) { this.armDemolish = b.id; dz.querySelector('span')!.innerHTML = `${G.trash} Точно знести? +50% монет`; dz.classList.add('danger'); return false; } demolish(w, b); this.armDemolish = null; this.closeCard(); return false; }, false, 'ubtn ghost');
+      r.append(dz);
       el.append(r);
-    } else if (!def.noBuild || b.type === 'hall') { if (!this.build.active) el.append(this.h('p', 'tip dim', 'Перемістити чи знести можна в режимі 🔨.')); }
+    } else if (!def.noBuild || b.type === 'hall') { if (!this.build.active) el.append(this.h('p', 'tip dim', 'Перемістити чи знести можна в режимі будівництва.')); }
   }
   private typeSection(el: HTMLElement, b: Building) {
     const w = this.w, def = BUILD[b.type], rows = this.h('div', 'rows');
     if (def.proc) {
       const p = procStats(b);
       rows.append(this.row('Стан', b.status || '—', b.status === 'Працює'));
-      rows.append(this.row(`${ITEMS[p.input].icon} Вхід`, `${invGet(b.input, p.input)} / ${p.inCap}`));
-      rows.append(this.row(`${ITEMS[p.output].icon} Вихід`, `${invGet(b.store, p.output)} / ${p.outCap}`, invGet(b.store, p.output) < p.outCap));
+      rows.append(this.row(`${ico(p.input)} Прийом`, `${invGet(b.input, p.input)} / ${p.inCap}`));
+      rows.append(this.row(`${ico(p.output)} Видача`, `${invGet(b.store, p.output)} / ${p.outCap}`, invGet(b.store, p.output) < p.outCap));
     }
     if (def.fuel) {
-      rows.append(this.row('Паливо', `${ITEMS[def.fuel.item].icon} ${Math.floor(b.fuel)} / ${def.fuel.cap}`, b.fuel > def.fuel.cap * 0.25));
+      rows.append(this.row('Паливо', `${ico(def.fuel.item)} ${Math.floor(b.fuel)} / ${def.fuel.cap}`, b.fuel > def.fuel.cap * 0.25));
       rows.append(this.row('Міцність', `${Math.ceil(b.hp)} / ${b.maxHp}`, b.hp >= b.maxHp));
       el.append(rows, this.h('p', 'tip', `Носії самі підкидають ${ITEMS[def.fuel.item].name.toLowerCase()} зі складу. Можна й самому: стань на помаранчевий майданчик.`)); return;
     }
     if (b.type === 'storage') {
       rows.append(this.row('Заповнено', `${invTotal(b.store)} / ${storageCap(b)}`, invTotal(b.store) < storageCap(b)));
-      for (const k of Object.keys(ITEMS) as ItemId[]) if (invGet(b.store, k)) rows.append(this.row(`${ITEMS[k].icon} ${ITEMS[k].name}`, String(invGet(b.store, k))));
+      for (const k of Object.keys(ITEMS) as ItemId[]) if (invGet(b.store, k)) rows.append(this.row(`${ico(k)} ${ITEMS[k].name}`, String(invGet(b.store, k))));
       el.append(rows, this.h('p', 'sub', 'Котики зараз'));
       const list = this.h('div', 'rows');
-      for (const c of w.cats) list.append(this.row(c.role === 'gatherer' ? BUILD[w.buildings[c.home]?.type ?? 'houseGatherer'].icon + ' Збирач' : c.role === 'hauler' ? '🐈 Носій' : '🛠️ Майстер', this.catDoing(c), !c.idle));
+      for (const c of w.cats) list.append(this.row(c.role === 'gatherer' ? BUILD[w.buildings[c.home]?.type ?? 'houseGatherer'].name : c.role === 'hauler' ? 'Носій' : 'Майстер', this.catDoing(c), !c.idle));
       el.append(list); return;
     }
     if (def.role) {
@@ -244,9 +255,9 @@ export class Hud {
     }
     if (b.type === 'barracks') {
       rows.append(this.row('Воїнів', `${w.units.length} / ${unitCap(w)}`)); rows.append(this.row('Стан', b.status || '—'));
-      if (b.queue?.length) rows.append(this.row('Черга', b.queue.map(k => UNITS[k].icon).join(' ')));
+      if (b.queue?.length) rows.append(this.row('Черга', b.queue.map(k => pic('cat_' + k)).join(' ')));
       el.append(rows);
-      for (const [k, u] of Object.entries(UNITS) as [keyof typeof UNITS, (typeof UNITS)[keyof typeof UNITS]][]) el.append(this.btn(`${u.icon} Навчити: ${u.name}`, u.cost, () => trainUnit(w, b, k)));
+      for (const [k, u] of Object.entries(UNITS) as [keyof typeof UNITS, (typeof UNITS)[keyof typeof UNITS]][]) el.append(this.btn(`${pic('cat_' + k)} Навчити: ${u.name}`, u.cost, () => trainUnit(w, b, k)));
       el.append(this.h('p', 'tip', 'Постав 🚩 Пости варти і признач на кожен потрібну кількість воїнів. Поранені лікуються тут.'));
       return;
     }
@@ -254,7 +265,7 @@ export class Hud {
       const free = (k: string) => w.units.filter(u => u.kind === k).length;
       for (const k of ['spear', 'sling'] as const) {
         const r = this.h('div', 'urow');
-        r.append(this.h('div', 'ic', UNITS[k].icon));
+        const ic = this.h('div', 'ic'); ic.innerHTML = pic('cat_' + k, 'ico big'); r.append(ic);
         const mid = this.h('div'); mid.append(this.h('div', 'nm', UNITS[k].name), this.h('div', 'ds', `тут ${w.units.filter(u => u.post === b.id && u.kind === k).length} · хочу ${b.want![k]} · усього в загоні ${free(k)}`)); r.append(mid);
         const pm = this.h('div', 'pm');
         const minus = this.h('button', 'segb', '−') as HTMLButtonElement; minus.onclick = () => { b.want![k] = Math.max(0, b.want![k] - 1); this.cardSig = ''; this.renderCard(true); };
@@ -282,10 +293,10 @@ export class Hud {
       if (u.req && !w.flags[u.req]) continue;
       const lv = w.up[u.id], max = u.costs.length;
       const row = this.h('div', 'urow');
-      row.append(this.h('div', 'ic', u.icon));
+      const ic = this.h('div', 'ic'); ic.innerHTML = UPG_ICON[u.id] || pic(u.id === 'axe' ? 'w_saw' : 'hero_leg', 'ico big'); row.append(ic);
       const mid = this.h('div'); mid.append(this.h('div', 'nm', u.name), this.h('div', 'ds', lv >= max ? 'Максимум!' : u.desc(lv)));
       const lvl = this.h('div', 'lv'); for (let i = 0; i < max; i++) lvl.append(this.h('i', i < lv ? 'on' : '')); mid.append(lvl);
-      row.append(mid, lv >= max ? this.btn('✓', null, () => false, true) : this.btn('', u.costs[lv], () => heroUpgrade(w, u.id)));
+      row.append(mid, lv >= max ? this.btn(G.check, null, () => false, true) : this.btn('', u.costs[lv], () => heroUpgrade(w, u.id)));
       el.append(row);
     }
   }
@@ -297,25 +308,33 @@ export class Hud {
     const w = this.w, d = $('drawer'); d.classList.add('on');
     $('bOk').hidden = !this.build.ghost;
     $('buildHint').textContent = this.build.ghost
-      ? (this.build.ghost.moving ? 'Торкнись нового місця і натисни ✓' : 'Торкнись мапи, щоб поставити. Тягни пальцем, щоб рухати камеру.')
+      ? (this.build.ghost.moving ? 'Торкнись нового місця і підтверди' : 'Торкнись мапи, щоб поставити. Тягни пальцем, щоб рухати камеру.')
       : 'Обери будівлю. Або торкнись будівлі на мапі, щоб перемістити чи знести.';
     const tabs = $('tabs'); tabs.innerHTML = '';
-    for (const c of CATEGORIES) { const b = this.h('button', 'tab' + (this.build.cat === c.id ? ' on' : ''), `${c.icon} ${c.name}`); b.onclick = () => { this.build.cat = c.id; this.renderDrawer(); }; tabs.append(b); }
+    for (const c of CATEGORIES) { const b = this.h('button', 'tab' + (this.build.cat === c.id ? ' on' : '')); b.innerHTML = `${G[c.id as keyof typeof G]}<span>${c.name}</span>`; b.onclick = () => { this.build.cat = c.id; this.renderDrawer(); }; tabs.append(b); }
     const list = $('blist'); list.innerHTML = '';
     for (const [type, def] of Object.entries(BUILD) as [BuildingType, (typeof BUILD)[BuildingType]][]) {
       if (def.cat !== this.build.cat || def.noBuild) continue;
       const lock = buildLock(w, type), afford = w.coins >= (def.cost.coins || 0);
-      const card = this.h('button', 'bitem' + (lock ? ' locked' : '') + (this.build.ghost?.type === type && !this.build.ghost.moving ? ' on' : '')) as HTMLButtonElement;
+      const card = this.h('button', 'bitem' + (lock ? ' locked' : !afford ? ' poor' : '') + (this.build.ghost?.type === type && !this.build.ghost.moving ? ' on' : '')) as HTMLButtonElement;
       const max = def.max?.[hallLevel(w) - 1];
-      card.innerHTML = `<div class="bi">${def.icon}</div><div class="bn">${def.name}</div><div class="bc">${lock ? '🔒 ' + lock : costLine(def.cost)}</div>${max !== undefined && !lock ? `<div class="bm">${count(w, type)}/${max}</div>` : ''}`;
+      card.innerHTML = `<div class="bi">${bIcon(type, 'thumb')}</div><div class="bn">${def.name}</div><div class="bc">${lock ? G.lock + ' ' + lock : costLine(def.cost)}</div>${max !== undefined && !lock ? `<div class="bm">${count(w, type)}/${max}</div>` : ''}`;
       card.disabled = !!lock;
       card.title = def.desc;
       card.onclick = () => {
-        if (!afford) { this.toast('Бракує монет', `${def.name}: потрібно ${def.cost.coins} 🪙. Матеріали можна довезти потім.`); return; }
-        const h = w.hero; this.build.ghost = { type, x: h.x, y: h.y - 90, ok: false }; this.build.selected = null; this.closeCard(); this.renderDrawer(); sfx('pick');
+        if (!afford) { this.toast('Бракує монет', `${def.name}: потрібно ${def.cost.coins} монет. Матеріали можна довезти потім.`); return; }
+        const spot = this.freeSpot(type); this.build.ghost = { type, x: spot.x, y: spot.y, ok: false }; this.build.selected = null; this.closeCard(); this.renderDrawer(); this.updateGhost(); sfx('pick');
       };
       list.append(card);
     }
+    const gd = this.build.ghost ? BUILD[this.build.ghost.type] : null;
+    $('bdesc').textContent = gd ? `${gd.name}: ${gd.desc}` : '';
+  }
+  /** Nearest valid spot around the hero, spiralling outwards, so a new ghost never starts red. */
+  private freeSpot(type: BuildingType): { x: number; y: number } {
+    const h = this.w.hero;
+    for (let r = 70; r < 520; r += 26) for (let a = 0; a < Math.PI * 2; a += 0.35) { const x = Math.round(h.x + Math.cos(a - 1.57) * r), y = Math.round(h.y + Math.sin(a - 1.57) * r * 0.8); if (!placeCheck(this.w, type, x, y)) return { x, y }; }
+    return { x: Math.round(h.x), y: Math.round(h.y - 90) };
   }
   private buildTap(x: number, y: number) {
     const w = this.w;
@@ -331,6 +350,7 @@ export class Hud {
     const btn = $<HTMLButtonElement>('bOk'); btn.disabled = !g.ok;
     const why = g.moving ? placeCheck(this.w, g.type, g.x, g.y, g.moving) : placeCheck(this.w, g.type, g.x, g.y) || buildLock(this.w, g.type);
     $('ghostWhy').textContent = why || '';
+    this.build.why = why || '';
   }
   private confirmGhost() {
     const g = this.build.ghost, w = this.w; if (!g || !g.ok) return;

@@ -177,7 +177,7 @@ export function barracksTick(w: World, dt: number) {
       const k = b.queue.shift()!; b.trainT = 0;
       const u = UNITS[k];
       w.units.push({ id: w.nextId++, kind: k, home: b.id, post: null, x: b.x, y: b.y + 50, face: 1, walkT: 0, moving: false, hp: u.hp, maxHp: u.hp, woundT: 0, swingT: 0, swing: 0, stuckT: 0, lx: b.x, ly: b.y });
-      w.events.push({ t: 'bubble', who: w.units[w.units.length - 1].id, s: 'Варта на місці!' });
+      w.events.push({ t: 'bubble', who: w.units[w.units.length - 1].id, s: 'На посту.' });
     }
   }
 }
