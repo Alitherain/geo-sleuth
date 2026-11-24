@@ -1,9 +1,9 @@
 import './assets/fonts.css';
 import './style.css';
-import Phaser from 'phaser';
-import { WorldScene } from './render/WorldScene';
+import { View } from './render3d/View';
 import { Hud } from './ui/hud';
 import { createWorld, type World } from './sim/world';
+import { step } from './sim/sim';
 import { loadSettings, loadWorld, requestPersist, saveWorld } from './platform/storage';
 import { OldSaveError } from './sim/save';
 import { audio, audioInit, musicTick, setMusic, setSound, sfx } from './platform/audio';
@@ -12,46 +12,41 @@ let oldSave = false;
 let world: World = (() => { try { return loadWorld() ?? createWorld(); } catch (e) { oldSave = e instanceof OldSaveError; return createWorld(); } })();
 const settings = loadSettings(); setSound(settings.sound); setMusic(settings.music);
 
-let scene: WorldScene | null = null;
-const hud = new Hud(() => world, w => { world = w; scene?.setWorld(w); saveWorld(w); });
+let view: View | null = null;
+const hud = new Hud(() => world, w => { world = w; view?.setWorld(w); saveWorld(w); });
 
-const DPR = Math.min(2, window.devicePixelRatio || 1);
-const size = () => ({ w: Math.floor(innerWidth * DPR), h: Math.floor(innerHeight * DPR) });
-
-async function boot() {
-  try { await Promise.race([document.fonts.load('800 16px Nunito'), new Promise(r => setTimeout(r, 1500))]); } catch { /* fallback fonts */ }
-  const s = size();
-  const game = new Phaser.Game({
-    type: Phaser.AUTO, parent: 'game', backgroundColor: '#1d1640',
-    scale: { mode: Phaser.Scale.NONE, width: s.w, height: s.h, zoom: 1 / DPR },
-    render: { antialias: true, roundPixels: false, maxTextures: 1 } as any,
-    banner: false,
-  });
-  game.scene.add('world', WorldScene, true, {
-    world: () => world,
-    input: hud.input,
-    running: () => hud.started && !hud.paused,
-    onEvent: (e: any) => {
-      hud.event(e);
-      if (e.t === 'nightWin') { sfx('win'); saveWorld(world); }
-      if (e.t === 'nightLose') sfx('lose');
-      if (e.t === 'build') saveWorld(world);
-    },
-    onFrame: (dt: number) => { hud.frame(dt); musicTick(world.clock.phase !== 'day'); },
-    build: () => hud.build,
-  });
-  const grab = () => { scene = game.scene.getScene('world') as WorldScene; hud.scene = scene; };
-  game.events.once('ready', grab); setTimeout(grab, 500);
-  addEventListener('resize', () => { const n = size(); game.scale.resize(n.w, n.h); game.scale.setZoom(1 / DPR); });
+function boot() {
+  view = new View(document.getElementById('game')!, () => world, () => hud.build);
+  hud.scene = view;
+  let last = performance.now(), acc = 0;
+  const loop = (now: number) => {
+    const dt = Math.min(0.05, (now - last) / 1000); last = now;
+    if (hud.started && !hud.paused) {
+      acc += dt; let n = 0;
+      while (acc >= 1 / 60 && n < 5) { step(world, hud.input, 1 / 60); acc -= 1 / 60; n++; }
+      if (n === 5) acc = 0;
+      for (const e of world.events) {
+        view!.handleEvent(e); hud.event(e);
+        if (e.t === 'nightWin') { sfx('win'); saveWorld(world); }
+        if (e.t === 'nightLose') sfx('lose');
+        if (e.t === 'build') saveWorld(world);
+      }
+      world.events.length = 0;
+    }
+    view!.frame(dt);
+    hud.frame(dt); musicTick(world.clock.phase !== 'day');
+    requestAnimationFrame(loop);
+  };
+  requestAnimationFrame(loop);
 }
-boot();
+try { boot(); } catch (e) { document.getElementById('title')!.insertAdjacentHTML('beforeend', `<p style="position:fixed;bottom:12px;left:0;right:0;text-align:center;color:#c07a5a">Не вдалося запустити 3D: ${(e as Error).message}</p>`); }
 
 if (world.time > 1) (document.getElementById('bStart') as HTMLButtonElement).textContent = 'Продовжити полювання';
 document.getElementById('bStart')!.onclick = () => {
   audioInit();
   document.getElementById('title')!.hidden = true;
   hud.started = true;
-  if (oldSave) hud.toast('Новий світ', 'Містечко перебудували з нуля: тепер будуєш де хочеш, ніч приходить сама, а світло треба годувати.');
+  if (oldSave) hud.toast('Новий світ', 'Містечко тепер на сітці з дорогами: нічого не замурується, а частокіл тягнеться лінією.');
   requestPersist();
   try { const el = document.documentElement; if (el.requestFullscreen && matchMedia('(pointer:coarse)').matches) el.requestFullscreen().catch(() => {}); } catch { /* ignore */ }
   try { (navigator as any).wakeLock?.request('screen').catch(() => {}); } catch { /* ignore */ }
@@ -59,8 +54,7 @@ document.getElementById('bStart')!.onclick = () => {
 setInterval(() => { if (hud.started) saveWorld(world); }, 5000);
 document.addEventListener('visibilitychange', () => { if (document.hidden) saveWorld(world); });
 addEventListener('pagehide', () => saveWorld(world));
-(window as any).__kb = { get world() { return world; }, hud, audio };
-import { step } from './sim/sim';
+(window as any).__kb = { get world() { return world; }, hud, audio, get view() { return view; } };
 (window as any).__kb.step = (seconds: number, input?: { x: number; y: number }) => { for (let i = 0; i < seconds * 60; i++) { step(world, input || hud.input, 1 / 60); for (const e of world.events) hud.event(e); world.events.length = 0; } };
 import * as economy from './sim/economy';
 (window as any).__kb.api = economy;

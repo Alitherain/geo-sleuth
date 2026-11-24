@@ -1,4 +1,4 @@
-import { BUILD, EDGE, GROVE, HILLS, MEADOW, ROAD_Y, TC, TOWN_R, W, H, WILDS, type BuildingType, type CatRole, type Cost, type EnemyKind, type GatherKind, type ItemId, type Req, type UnitKind } from '../content/data';
+import { BUILD, CELL, EDGE, GROVE, HILLS, MEADOW, ROAD_Y, TC, TOWN_R, W, H, WILDS, type BuildingType, type CatRole, type Cost, type EnemyKind, type GatherKind, type ItemId, type Req, type UnitKind } from '../content/data';
 
 export type Inv = Partial<Record<ItemId, number>>;
 export interface P { x: number; y: number }
@@ -6,7 +6,7 @@ export interface P { x: number; y: number }
 export interface Hero {
   x: number; y: number; vx: number; vy: number; face: number; walkT: number; moving: boolean;
   stack: ItemId[]; hp: number; inv: number; hurtT: number; regenT: number; dead: number;
-  swingT: number; swing: number; form: 'axe' | 'saw';
+  swingT: number; swing: number; form: 'axe' | 'saw'; padT?: number;
 }
 export type NodeKind = 'oak' | 'pine' | 'lav' | 'rock' | 'bush';
 export interface ResNode {
@@ -135,16 +135,17 @@ export function makeBuilding(w: World, type: BuildingType, x: number, y: number,
 
 export function createWorld(): World {
   const w: World = {
-    version: 2, time: 0, coins: 10, nextId: 1,
-    hero: { x: TC.x, y: TC.y + 160, vx: 0, vy: 0, face: 1, walkT: 0, moving: false, stack: [], hp: 5, inv: 0, hurtT: 0, regenT: 0, dead: 0, swingT: 0, swing: 0, form: 'axe' },
+    version: 3, time: 0, coins: 10, nextId: 1,
+    hero: { x: TC.x, y: TC.y + 4 * CELL, vx: 0, vy: 0, face: 1, walkT: 0, moving: false, stack: [], hp: 5, inv: 0, hurtT: 0, regenT: 0, dead: 0, swingT: 0, swing: 0, form: 'axe' },
     nodes: [], buildings: {}, cats: [], units: [], enemies: [], ground: [], shots: [],
     up: { bag: 0, axe: 0, boots: 0, heart: 0, mint: 0 },
     clock: { phase: 'day', t: 0, day: 1, n: 0, queue: [], reward: 0, title: '', dirs: [], dark: 0, early: false },
     flags: {}, stats: { earned: 0, felled: 0, hunted: 0, nights: 0, bosses: 0 }, events: [],
   };
-  makeBuilding(w, 'hall', TC.x, TC.y - 40, { id: 'hall' });
-  makeBuilding(w, 'heart', TC.x, TC.y + 80, { id: 'heart', fuel: 30 });
-  makeBuilding(w, 'shop', TC.x - 170, TC.y + 20, { id: 'shop' });
+  // grid positions (see sim/grid.ts): hall on the crossroads, the fire and the owl in the southern quarters
+  makeBuilding(w, 'hall', TC.x, TC.y, { id: 'hall' });
+  makeBuilding(w, 'heart', TC.x + 3 * CELL, TC.y + 3 * CELL, { id: 'heart', fuel: 30 });
+  makeBuilding(w, 'shop', TC.x - 3.5 * CELL, TC.y + 3.5 * CELL, { id: 'shop' });
   genNodes(w);
   return w;
 }

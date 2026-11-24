@@ -1,5 +1,6 @@
-import { BUILD, HEDGE_X, W, H } from '../content/data';
+import { BUILD, HEDGE_X, WALKABLE, W, H } from '../content/data';
 import type { World } from './world';
+import { findPath } from './grid';
 
 export interface Body { x: number; y: number }
 
@@ -8,11 +9,15 @@ export interface Body { x: number; y: number }
 export function collide(w: World, e: Body, rad: number, opts: { enemy?: boolean; ignoreNodes?: boolean } = {}): string | null {
   let hitWall: string | null = null;
   for (const b of Object.values(w.buildings)) {
-    const def = BUILD[b.type]; let r = def.r;
+    const def = BUILD[b.type];
     if (b.type === 'palisade') { if (!opts.enemy || b.hp <= 0 || b.site) continue; }
-    else if (def.comfort && b.type !== 'fountain') continue; // small decor is walkable
-    const dx = e.x - b.x, dy = e.y - (b.y - 6), d = Math.hypot(dx, dy), m = r + rad;
-    if (d < m && d > 0.01) { e.x += dx / d * (m - d); e.y += dy / d * (m - d); if (b.type === 'palisade') hitWall = b.id; }
+    else if (WALKABLE(b.type)) continue; // small decor is walkable
+    // square footprint: push out along the shallower axis
+    const hw = def.r - (b.type === 'palisade' ? 0 : 3) + rad, dx = e.x - b.x, dy = e.y - b.y;
+    if (Math.abs(dx) >= hw || Math.abs(dy) >= hw) continue;
+    const px = hw - Math.abs(dx), py = hw - Math.abs(dy);
+    if (px < py) e.x += Math.sign(dx || 1) * px; else e.y += Math.sign(dy || 1) * py;
+    if (b.type === 'palisade') hitWall = b.id;
   }
   if (!opts.ignoreNodes) for (const n of w.nodes) {
     if (!n.alive || n.kind === 'bush') continue;
@@ -33,5 +38,19 @@ export function moveToward(e: Mover, tx: number, ty: number, spd: number, dt: nu
   const s = Math.min(spd * dt, d);
   e.x += dx / d * s; e.y += dy / d * s; e.moving = true; e.walkT += dt;
   if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy) * 0.35) e.face = dx > 0 ? 1 : -1;
+  return false;
+}
+
+/** Walk toward a target, following a grid path around buildings. Path is cached on the walker and refreshed
+ * when the target moves, every few seconds, or when it gets stuck. */
+export interface PathWalker extends Mover { path?: { tx: number; ty: number; pts: { x: number; y: number }[]; t: number } }
+export function walkTo(w: World, e: PathWalker, tx: number, ty: number, spd: number, dt: number, arrive = 4): boolean {
+  let p = e.path;
+  if (!p || Math.abs(p.tx - tx) > 20 || Math.abs(p.ty - ty) > 20 || w.time - p.t > 4) { p = e.path = { tx, ty, pts: findPath(w, e.x, e.y, tx, ty), t: w.time }; }
+  while (p.pts.length > 1 && Math.hypot(p.pts[0].x - e.x, p.pts[0].y - e.y) < 14) p.pts.shift();
+  const wp = p.pts[0] ?? { x: tx, y: ty }, last = p.pts.length <= 1;
+  const done = moveToward(e, last ? tx : wp.x, last ? ty : wp.y, spd, dt, last ? arrive : 2);
+  if (done && last) { e.path = undefined; return true; }
+  if (done) p.pts.shift();
   return false;
 }

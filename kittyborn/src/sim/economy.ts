@@ -1,6 +1,7 @@
-import { BUILD, HERO_UPG, ITEMS, PROJECTS, TC, UNITS, W, H, type BuildingType, type Cost, type ItemId, type UnitKind } from '../content/data';
-import { allOf, available, costItems, count, dist, firstOf, hallLevel, invAdd, invGet, levelStats, makeBuilding, procStats, reqMet, townR, type Building, type World } from './world';
+import { BUILD, HERO_UPG, ITEMS, PROJECTS, UNITS, type BuildingType, type Cost, type ItemId, type UnitKind } from '../content/data';
+import { allOf, available, costItems, count, firstOf, hallLevel, invAdd, invGet, levelStats, makeBuilding, procStats, reqMet, type Building, type World } from './world';
 import { syncCats } from './logistics';
+import { gridCheck, snap } from './grid';
 
 export const storage = (w: World): Building | undefined => firstOf(w, 'storage');
 
@@ -56,21 +57,7 @@ export function addFuel(w: World, b: Building, n: number) {
 
 // ---------------------------------------------------------------- placement
 export function placeCheck(w: World, type: BuildingType, x: number, y: number, ignore?: string): string | null {
-  const def = BUILD[type];
-  const R = townR(w), d = dist(x, y, TC.x, TC.y);
-  if (def.zone === 'town' && d > R - def.r * 0.5) return 'Лише в межах містечка';
-  if (def.zone === 'near' && d > R + 260) return 'Задалеко від містечка';
-  if (x < 80 || x > W - 80 || y < 140 || y > H - 70) return 'Край мапи';
-  for (const b of Object.values(w.buildings)) {
-    if (b.id === ignore) continue;
-    const gap = type === 'palisade' && b.type === 'palisade' ? -10 : 6;
-    if (dist(x, y, b.x, b.y) < def.r + BUILD[b.type].r + gap) return 'Заважає будівля';
-    for (const s of BUILD[b.type].slots || []) if (dist(x, y, b.x + s.dx, b.y + s.dy) < def.r + 26) return 'Закриває майданчик іншої будівлі';
-  }
-  for (const s of def.slots || []) for (const b of Object.values(w.buildings)) if (b.id !== ignore && dist(x + s.dx, y + s.dy, b.x, b.y) < BUILD[b.type].r + 26) return 'Майданчик упирається в будівлю';
-  for (const n of w.nodes) if (n.alive && dist(x, y, n.x, n.y) < def.r + 14) return 'Заважає дерево чи камінь';
-  if (!w.flags.hedge && x < 520) return 'За хащами';
-  return null;
+  return gridCheck(w, type, x, y, ignore);
 }
 export function buildLock(w: World, type: BuildingType): string | null {
   const def = BUILD[type];
@@ -83,6 +70,7 @@ export function buildLock(w: World, type: BuildingType): string | null {
 }
 export function place(w: World, type: BuildingType, x: number, y: number): Building | null {
   const def = BUILD[type];
+  ({ x, y } = snap(type, x, y));
   if (buildLock(w, type) || placeCheck(w, type, x, y) || w.coins < (def.cost.coins || 0)) return null;
   w.coins -= def.cost.coins || 0;
   const items = Object.fromEntries(costItems(def.cost)) as Partial<Record<ItemId, number>>;
@@ -108,6 +96,7 @@ export function deliverToSite(w: World, b: Building, k: ItemId, n = 1) {
   if (!Object.keys(b.site).length) completeSite(w, b);
 }
 export function moveBuilding(w: World, b: Building, x: number, y: number): boolean {
+  ({ x, y } = snap(b.type, x, y));
   if (placeCheck(w, b.type, x, y, b.id)) return false;
   b.x = x; b.y = y; w.events.push({ t: 'placed', x, y });
   return true;

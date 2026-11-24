@@ -13,7 +13,7 @@ body { font-family: var(--ui); color: var(--parch); }
 #game canvas { display: block; width: 100% !important; height: 100% !important; }
 .gl { width: 1.15em; height: 1.15em; flex: none; display: inline-block; vertical-align: -0.2em; }
 .ico { height: 1.25em; width: auto; vertical-align: -0.28em; image-rendering: auto; }
-.ico.big { height: 2em; }
+.ico.lg { height: 2em; }
 .cost { white-space: nowrap; }
 
 /* panels: dark parchment in an iron frame */
@@ -155,3 +155,22 @@ textarea { width: 100%; box-sizing: border-box; border-radius: 2px; border: 1px 
   body.building #hudR { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+/* labels projected from the 3D scene */
+#labels { position: fixed; inset: 0; pointer-events: none; z-index: 3; overflow: hidden; }
+#labels > div { position: absolute; left: 0; top: 0; will-change: transform; white-space: nowrap; }
+#labels .bub { background: var(--parch); color: var(--ink); font-size: 12.5px; font-weight: 700; padding: 3px 8px; border-radius: 2px; box-shadow: 0 2px 6px rgba(0,0,0,.5); margin-top: -6px; }
+#labels .ft { font-family: var(--title); font-weight: 700; font-size: 20px; color: var(--parch2); text-shadow: 0 0 3px #000, 0 2px 4px #000; }
+#labels .ft.coin { color: var(--gold2); font-size: 22px; }
+#labels .ft.dmg { color: #d9a080; font-size: 16px; }
+#labels .blbl { background: rgba(20,17,15,.85); border: 1px solid rgba(176,138,62,.35); color: var(--parch); font-size: 12px; padding: 1px 7px; border-radius: 2px; }
+#labels .blbl.warn { color: #e0a07a; border-color: rgba(192,67,47,.6); }
+#labels .bbar { display: flex; flex-direction: column; gap: 2px; width: 44px; }
+#labels .bbar i { display: block; height: 5px; background: rgba(20,12,10,.85); border: 1px solid #120f0d; }
+#labels .bbar b { display: block; height: 100%; background: #8a9a70; }
+#labels .bbar .fu b { background: #c9883a; }
+#labels .ehp { width: 32px; height: 5px; background: rgba(20,12,10,.85); border: 1px solid #120f0d; }
+#labels .ehp i { display: block; height: 100%; background: #c0432f; }
+#labels .ehp.lit i { background: #ffb84a; }
+#ghostWhy.ok { color: #b8c08a; }
+#bdesc b { color: var(--parch2); }

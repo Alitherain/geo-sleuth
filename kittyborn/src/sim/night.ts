@@ -1,5 +1,5 @@
 import { BUILD, DAY_LEN, DUSK_LEN, ENEMIES, FIRST_DAY_MAX, SPAWNS, TC, UNITS, waveFor, type EnemyKind, type ItemId } from '../content/data';
-import { collide, moveToward } from './physics';
+import { collide, moveToward, walkTo } from './physics';
 import { releaseTask } from './logistics';
 import { allOf, clamp, dist, has, inRect, lightRadius, WILDS, type Building, type Enemy, type Unit, type World } from './world';
 
@@ -106,16 +106,16 @@ function updateEnemy(w: World, e: Enemy, dt: number) {
   const spd = def.speed * (e.lit ? 0.55 : 1);
   const foe = e.kind === 'shade' ? null : nearestFoe(w, e, 80);
   if (foe) {
-    moveToward(e, foe.x, foe.y, spd * 1.3, dt, e.r + 10);
+    walkTo(w, e, foe.x, foe.y, spd * 1.3, dt, e.r + 10);
     if (dist(e.x, e.y, foe.x, foe.y) < e.r + 18 && e.atkCd <= 0) { foe.hit(1); e.atkCd = 1.1; }
   } else {
     const l = targetLight(w, e);
     if (l) {
-      const reach = e.r + BUILD[l.type].r + 6;
+      const reach = e.r + BUILD[l.type].r * 1.25 + 8;
       if (dist(e.x, e.y, l.x, l.y) < reach) {
         e.moving = false;
         if (e.atkCd <= 0) { e.atkCd = 1; l.hp -= def.dmg; w.events.push({ t: 'wallHit', x: l.x, y: l.y - 30 }); if (l.hp <= 0) { l.hp = 0; l.fuel = 0; w.events.push({ t: 'lightOut', x: l.x, y: l.y }); } }
-      } else moveToward(e, l.x, l.y, spd, dt);
+      } else walkTo(w, e, l.x, l.y, spd, dt);
     }
   }
   for (const o of w.enemies) { if (o === e) continue; const d = dist(e.x, e.y, o.x, o.y), m = e.r + o.r; if (d < m && d > 0.1) { e.x += (e.x - o.x) / d * (m - d) * 0.5; e.y += (e.y - o.y) / d * (m - d) * 0.5; } }
@@ -129,7 +129,7 @@ function updateBoss(w: World, e: Enemy, dt: number) {
   if (B.state === 'walk') {
     const near = !h.dead && dist(e.x, e.y, h.x, h.y) < 320;
     if (near) moveToward(e, h.x, h.y, 60, dt);
-    else { const l = targetLight(w, e); if (l) { if (dist(e.x, e.y, l.x, l.y) < e.r + 30) { if (e.atkCd <= 0) { e.atkCd = 1.2; l.hp -= 10; if (l.hp <= 0) { l.hp = 0; l.fuel = 0; w.events.push({ t: 'lightOut', x: l.x, y: l.y }); } } } else moveToward(e, l.x, l.y, 55, dt); } }
+    else { const l = targetLight(w, e); if (l) { if (dist(e.x, e.y, l.x, l.y) < e.r + BUILD[l.type].r * 1.25 + 8) { if (e.atkCd <= 0) { e.atkCd = 1.2; l.hp -= 10; if (l.hp <= 0) { l.hp = 0; l.fuel = 0; w.events.push({ t: 'lightOut', x: l.x, y: l.y }); } } } else walkTo(w, e, l.x, l.y, 55, dt); } }
     if (!h.dead && dist(e.x, e.y, h.x, h.y) < e.r + 14 && e.atkCd <= 0) { hurtHero(w, 1); e.atkCd = 1; }
     if (B.t > 2.6 && near) { B.state = 'tele'; B.t = 0; B.tx = h.x; B.ty = h.y; }
   } else if (B.state === 'tele') {
@@ -207,7 +207,7 @@ export function updateUnits(w: World, dt: number) {
     const home = w.buildings[u.home];
     if (u.woundT > 0) {
       u.woundT -= dt;
-      if (home && dist(u.x, u.y, home.x, home.y + 50) > 10) moveToward(u, home.x, home.y + 50, def.speed * 0.7, dt, 8);
+      if (home && dist(u.x, u.y, home.x, home.y + 50) > 10) walkTo(w, u, home.x, home.y + 50, def.speed * 0.7, dt, 8);
       if (u.woundT <= 0) u.hp = u.maxHp;
       collide(w, u, 10); continue;
     }
@@ -218,7 +218,7 @@ export function updateUnits(w: World, dt: number) {
     for (const e of w.enemies) { if (e.passive || e.z > 20) continue; const d = dist(anchor.x, anchor.y, e.x, e.y); if (d < 210 && d < bd) { bd = d; tgt = e; } }
     if (tgt) {
       const d = dist(u.x, u.y, tgt.x, tgt.y);
-      if (d > def.range + tgt.r) moveToward(u, tgt.x, tgt.y, def.speed, dt, 4);
+      if (d > def.range + tgt.r) walkTo(w, u, tgt.x, tgt.y, def.speed, dt, 4);
       else {
         u.moving = false; u.face = tgt.x > u.x ? 1 : -1;
         if (u.swingT <= 0) {
@@ -229,7 +229,7 @@ export function updateUnits(w: World, dt: number) {
       }
     } else {
       const idx = w.units.filter(x => x.post === u.post).indexOf(u), a = idx * 2.1;
-      moveToward(u, anchor.x + Math.cos(a) * 34, anchor.y + 20 + Math.sin(a) * 18, def.speed * 0.8, dt, 6);
+      walkTo(w, u, anchor.x + Math.cos(a) * 34, anchor.y + 20 + Math.sin(a) * 18, def.speed * 0.8, dt, 6);
     }
     collide(w, u, 10);
   }

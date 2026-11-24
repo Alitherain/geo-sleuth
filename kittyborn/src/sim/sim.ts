@@ -13,7 +13,7 @@ export function heroSlot(w: World): Slot {
   const h = w.hero;
   for (const b of Object.values(w.buildings)) {
     if (b.site) { if (dist(h.x, h.y, b.x, b.y) < BUILD[b.type].r + 34) return { slot: 'site', b }; continue; }
-    for (const s of BUILD[b.type].slots || []) if (Math.abs(h.x - (b.x + s.dx)) < 32 && Math.abs(h.y - (b.y + s.dy)) < 32) return { slot: s.kind, b };
+    for (const s of BUILD[b.type].slots || []) if (Math.abs(h.x - (b.x + s.dx)) < 30 && Math.abs(h.y - (b.y + s.dy)) < 26) return { slot: s.kind, b };
   }
   return null;
 }
@@ -82,7 +82,9 @@ function heroUpdate(w: World, input: Input, dt: number) {
   }
   transferT -= dt;
   if (transferT > 0) return;
-  const s = heroSlot(w); if (!s) return;
+  const s = heroSlot(w); if (!s) { h.padT = 0; return; }
+  // pads act only once the hero stops on them, so running past the owl never sells the bag by accident
+  if (s.slot !== 'site') { if (Math.hypot(h.vx, h.vy) > 70) { h.padT = 0; return; } h.padT = (h.padT || 0) + dt; if (h.padT < 0.25) return; }
   const b = s.b, top = h.stack.length ? h.stack[h.stack.length - 1] : null;
   const toward = (item: ItemId, x: number, y: number) => w.events.push({ t: 'fly', item, fx: h.x, fy: h.y, fz: 40, to: { x, y } });
   const takeOf = (k: ItemId) => { const i = h.stack.lastIndexOf(k); if (i < 0) return false; h.stack.splice(i, 1); return true; };

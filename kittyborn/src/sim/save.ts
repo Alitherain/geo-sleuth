@@ -1,7 +1,7 @@
 import { syncCats } from './logistics';
 import { createWorld, type World } from './world';
 
-export const SCHEMA = 2;
+export const SCHEMA = 3;
 export interface SaveEnvelope { schemaVersion: number; game: 'dark-kittyborn'; savedAt: number; world: any }
 
 export function serialize(w: World): SaveEnvelope {
@@ -12,7 +12,7 @@ export function serialize(w: World): SaveEnvelope {
       ...rest,
       enemies: w.clock.phase === 'night' ? w.enemies.filter(e => !e.passive) : [],
       nodes: nodes.map(n => [n.id, n.alive ? 1 : 0, Math.round(n.hp * 10) / 10, Math.round(n.regrow)]),
-      cats: w.cats.map(c => ({ ...c, task: null, stack: [] })),
+      cats: w.cats.map(c => ({ ...c, task: null, stack: [], path: undefined })),
       buildings: Object.fromEntries(Object.entries(w.buildings).map(([id, b]) => [id, { ...b, reserved: {}, incoming: {} }])),
     },
   };
@@ -23,7 +23,7 @@ const MIGRATIONS: Record<number, (w: any) => any> = {};
 
 export function deserialize(env: SaveEnvelope): World {
   if (!env || env.game !== 'dark-kittyborn' || typeof env.schemaVersion !== 'number' || !env.world) throw new Error('Це не збереження Dark KittyBorn');
-  if (env.schemaVersion < 2) throw new OldSaveError('Збереження з першої версії: світ змінився, почнемо заново');
+  if (env.schemaVersion < 3) throw new OldSaveError('Збереження зі старої версії: містечко тепер на сітці, почнемо заново');
   let data = env.world;
   for (let v = env.schemaVersion; v < SCHEMA; v++) data = MIGRATIONS[v]?.(data) ?? data;
   const w = createWorld();

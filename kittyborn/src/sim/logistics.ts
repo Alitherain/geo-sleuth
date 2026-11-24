@@ -3,7 +3,7 @@
 // An idle hauler scores every possible trip and claims the best one. Claims reserve the amount at both ends,
 // so two cats never chase the same goods and a cat finishes the trip it started.
 import { BUILD, ITEMS, type GatherKind, type ItemId } from '../content/data';
-import { collide, moveToward } from './physics';
+import { collide, walkTo } from './physics';
 import { allOf, available, catBoost, catCap, catSpeed, dist, invAdd, invGet, nodeOpen, procStats, storageFree, type Building, type Cat, type P, type ResNode, type World } from './world';
 import { addFuel, deliverToSite, sell } from './economy';
 
@@ -112,7 +112,7 @@ export function syncCats(w: World) {
     const want = BUILD[b.type].levels ? (BUILD[b.type].levels![b.level - 1].stats.cats || 1) : 1;
     const have = w.cats.filter(c => c.home === b.id).length;
     for (let i = have; i < want; i++) {
-      w.cats.push({ id: w.nextId++, role, home: b.id, x: b.x, y: b.y + 30, face: 1, walkT: 0, moving: false, stack: [], task: null, idle: '', swingT: 0, swing: 0, waitT: 0, stuckT: 0, lx: b.x, ly: b.y, hidden: false });
+      w.cats.push({ id: w.nextId++, role, home: b.id, x: b.x, y: b.y + BUILD[b.type].r + 14, face: 1, walkT: 0, moving: false, stack: [], task: null, idle: '', swingT: 0, swing: 0, waitT: 0, stuckT: 0, lx: b.x, ly: b.y, hidden: false });
       if (Math.random() < 0.4) w.events.push({ t: 'bubble', who: w.cats[w.cats.length - 1].id, s: 'На зміні.' });
     }
   }
@@ -125,7 +125,7 @@ export function updateCats(w: World, dt: number) {
     c.stuckT += dt;
     if (c.stuckT > 0.9) { if (c.moving && dist(c.x, c.y, c.lx, c.ly) < 6) { c.x += (Math.random() - 0.5) * 34; c.y += (Math.random() - 0.5) * 34; } c.lx = c.x; c.ly = c.y; c.stuckT = 0; }
     if (w.clock.phase === 'night' && c.role === 'gatherer') { goHome(w, c, dt); continue; }
-    if (c.hidden) { c.hidden = false; const h = w.buildings[c.home]; if (h) { c.x = h.x; c.y = h.y + 30; } }
+    if (c.hidden) { c.hidden = false; const h = w.buildings[c.home]; if (h) { c.x = h.x; c.y = h.y + BUILD[h.type].r + 14; } }
     if (c.role === 'gatherer') gatherer(w, c, dt);
     else if (c.role === 'hauler') hauler(w, c, dt);
     else master(w, c, dt);
@@ -137,7 +137,7 @@ function goHome(w: World, c: Cat, dt: number) {
   if (c.task?.kind === 'haul') { carry(w, c, dt); return; } // finish the delivery first
   if (c.hidden) return;
   const h = w.buildings[c.home]; if (!h) return;
-  if (moveToward(c, h.x, h.y + 26, catSpeed(w) * 1.3, dt, 8)) c.hidden = true;
+  if (walkTo(w, c, h.x, h.y + 26, catSpeed(w) * 1.3, dt, 8)) c.hidden = true;
   collide(w, c, 10);
 }
 const GATHER_NODES: Record<GatherKind, ResNode['kind'][]> = { wood: ['oak', 'pine', 'lav'], stone: ['rock'], berry: ['bush'] };
@@ -166,7 +166,7 @@ function gatherer(w: World, c: Cat, dt: number) {
   }
   if (!t) { c.idle = kinds[0] === 'rock' ? 'Нема каменю' : kinds[0] === 'bush' ? 'Ягоди ще не виросли' : 'Нема дерев'; c.waitT += dt; c.moving = false; return; }
   c.waitT = 0;
-  if (dist(c.x, c.y, t.x, t.y) > 34) moveToward(c, t.x + (c.x < t.x ? -26 : 26), t.y + 4, catSpeed(w), dt, 6);
+  if (dist(c.x, c.y, t.x, t.y) > 34) walkTo(w, c, t.x + (c.x < t.x ? -26 : 26), t.y + 4, catSpeed(w), dt, 6);
   else { c.moving = false; c.face = t.x > c.x ? 1 : -1; if (c.swingT <= 0) { c.swing = 1; c.swingT = 0.8 / catBoost(w); harvestNode(w, t, c); } }
 }
 function hauler(w: World, c: Cat, dt: number) {
@@ -182,7 +182,7 @@ function hauler(w: World, c: Cat, dt: number) {
   // pick up loot on the ground near town
   const g = w.ground.filter(x => x.age > 1 && dist(x.x, x.y, 1500, 1000) < 900).sort((a, b) => dist(c.x, c.y, a.x, a.y) - dist(c.x, c.y, b.x, b.y))[0];
   if (g) {
-    if (moveToward(c, g.x, g.y, catSpeed(w), dt, 10)) {
+    if (walkTo(w, c, g.x, g.y, catSpeed(w), dt, 10)) {
       for (let i = w.ground.length - 1; i >= 0 && c.stack.length < cap; i--) { const q = w.ground[i]; if (dist(q.x, q.y, c.x, c.y) < 50) { c.stack.push(q.type); w.ground.splice(i, 1); w.events.push({ t: 'fly', item: q.type, fx: q.x, fy: q.y, fz: 0, to: c.id }); } }
       if (c.stack.length && (c.stack.length >= cap || !w.ground.some(q => dist(q.x, q.y, c.x, c.y) < 200))) deliverCarried(w, c);
     }
@@ -191,7 +191,7 @@ function hauler(w: World, c: Cat, dt: number) {
   if (c.stack.length) { deliverCarried(w, c); return; }
   const st = allOf(w, 'storage')[0];
   c.idle = st && storageFree(st) <= 0 ? 'Склад повний' : 'Нема роботи';
-  const h = w.buildings[c.home]; if (h) moveToward(c, h.x + 30, h.y + 40, catSpeed(w) * 0.5, dt, 12);
+  const h = w.buildings[c.home]; if (h) walkTo(w, c, h.x + 30, h.y + 40, catSpeed(w) * 0.5, dt, 12);
 }
 function deliverCarried(w: World, c: Cat) {
   const k = c.stack[c.stack.length - 1], n = c.stack.filter(i => i === k).length, to = dropTarget(w, k, n, c);
@@ -202,7 +202,7 @@ function carry(w: World, c: Cat, dt: number) {
   if (t.stage === 'toSource' && t.from) {
     const p = endpointPos(w, t.from);
     if (!p) { releaseTask(w, c); return; }
-    if (moveToward(c, p.x, p.y, catSpeed(w), dt, 6)) {
+    if (walkTo(w, c, p.x, p.y, catSpeed(w), dt, 6)) {
       const got = takeFrom(w, t.from, t.item!, t.n);
       for (let i = 0; i < got; i++) { c.stack.push(t.item!); w.events.push({ t: 'fly', item: t.item!, fx: p.x, fy: p.y, fz: 10, to: c.id }); }
       if (got < t.n && t.to) reserveTarget(w, t.to, t.item!, got - t.n);
@@ -218,7 +218,7 @@ function carry(w: World, c: Cat, dt: number) {
     const k = t.item!, n = c.stack.filter(i => i === k).length; if (!n) { c.task = null; return; }
     const to = dropTarget(w, k, n, c); reserveTarget(w, to, k, n); t.to = to; return;
   }
-  if (moveToward(c, p.x, p.y, catSpeed(w), dt, 6)) {
+  if (walkTo(w, c, p.x, p.y, catSpeed(w), dt, 6)) {
     c.moving = false;
     if (c.swingT > 0) return;
     const i = c.stack.lastIndexOf(t.item!);
@@ -233,9 +233,9 @@ function carry(w: World, c: Cat, dt: number) {
 function master(w: World, c: Cat, dt: number) {
   const dmg = Object.values(w.buildings).filter(b => !b.site && (b.type === 'palisade' || b.type === 'tower' || BUILD[b.type].fuel) && b.hp < b.maxHp)
     .sort((a, b) => a.hp / a.maxHp - b.hp / b.maxHp)[0];
-  if (!dmg) { c.idle = 'Усе ціле'; const h = w.buildings[c.home]; if (h) moveToward(c, h.x - 30, h.y + 40, catSpeed(w) * 0.5, dt, 12); return; }
+  if (!dmg) { c.idle = 'Усе ціле'; const h = w.buildings[c.home]; if (h) walkTo(w, c, h.x - 30, h.y + 40, catSpeed(w) * 0.5, dt, 12); return; }
   c.idle = '';
-  if (moveToward(c, dmg.x + (c.x < dmg.x ? -BUILD[dmg.type].r - 10 : BUILD[dmg.type].r + 10), dmg.y + 14, catSpeed(w), dt, 8)) {
+  if (walkTo(w, c, dmg.x + (c.x < dmg.x ? -BUILD[dmg.type].r - 10 : BUILD[dmg.type].r + 10), dmg.y + 14, catSpeed(w), dt, 8)) {
     c.moving = false; c.face = dmg.x > c.x ? 1 : -1;
     if (c.swingT <= 0) { c.swing = 1; c.swingT = 0.5; dmg.hp = Math.min(dmg.maxHp, dmg.hp + 6 * catBoost(w)); w.events.push({ t: 'chop', x: dmg.x, y: dmg.y, kind: 'repair' }); }
   }

@@ -4,7 +4,8 @@ import { callNightEarly, litLights, nextWave, secondsToDusk } from '../sim/night
 import { nearBuilding, type Input } from '../sim/sim';
 import { exportCode, importCode } from '../sim/save';
 import { comfort, count, dist, has, hallLevel, heroCap, heroMaxHp, invGet, invTotal, levelStats, procStats, reqMet, storageCap, type Building, type GameEvent, type World } from '../sim/world';
-import type { Ghost, WorldScene } from '../render/WorldScene';
+import type { Ghost, View } from '../render3d/View';
+import { lineCells, perimeterCells, snap, validSpots } from '../sim/grid';
 import { audio, audioInit, setMusic, setSound, sfx } from '../platform/audio';
 import { G } from './glyphs';
 import { clearSave, saveSettings } from '../platform/storage';
@@ -12,10 +13,9 @@ import { clearSave, saveSettings } from '../platform/storage';
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 let THUMB: (key: string) => string = () => '';
 const pic = (key: string, cls = 'ico') => { const u = THUMB(key); return u ? `<img class="${cls}" src="${u}" alt="">` : ''; };
-const ico = (k: string) => pic(k === 'coins' ? 'it_coin' : 'it_' + k);
+const ico = (k: string) => pic(k === 'coins' ? 'i:coin' : 'i:' + k);
 const costLine = (c: Cost) => (Object.entries(c) as [string, number][]).filter(([, n]) => n).map(([k, n]) => `<span class="cost">${ico(k)}${n}</span>`).join(' ') || 'безкоштовно';
-const BKEY: Partial<Record<string, string>> = { hall: 'bd_hall1', houseGatherer: 'bd_house_gatherer', houseQuarry: 'bd_house_quarry', houseForager: 'bd_house_forager', houseHauler: 'bd_house_hauler', houseMaster: 'bd_house_master', palisade: 'bd_pal', post: 'bd_post', ledLamp: 'bd_lantern_off', shop: 'bd_shop' };
-const bIcon = (t: string, cls = 'ico') => pic(BKEY[t] || 'bd_' + t, cls);
+const bIcon = (t: string, cls = 'ico') => pic('b:' + (t === 'ledLamp' ? 'lantern' : t), cls);
 const UPG_ICON: Record<string, string> = { bag: G.bag, axe: '', boots: '', heart: G.defense, mint: G.decor };
 const TUT: { text: string; done: (w: World) => boolean }[] = [
   { text: 'Підійди до дерева: сокира рубає сама', done: w => w.stats.felled > 0 },
@@ -29,8 +29,8 @@ const TUT: { text: string; done: (w: World) => boolean }[] = [
 export class Hud {
   input: Input = { x: 0, y: 0 };
   started = false; paused = false;
-  scene: WorldScene | null = null;
-  build = { active: false, ghost: null as Ghost | null, selected: null as string | null, cat: 'eco' as Category, why: '' };
+  scene: View | null = null;
+  build = { active: false, ghost: null as Ghost | null, selected: null as string | null, cat: 'eco' as Category, why: '', spots: [] as { x: number; y: number }[], anchor: null as { x: number; y: number } | null };
   private cardFor: string | null = null; private cardSig = ''; private chipFor: string | null = null;
   private toastT = 0; private shown = { coins: -1, bag: '', hp: '', clock: '', tut: '' };
   private joy = { on: false, id: -1, ox: 0, oy: 0, sx: 0, sy: 0, moved: false };
@@ -60,7 +60,7 @@ export class Hud {
       if (this.build.active) {
         const dx = e.clientX - this.joy.ox, dy = e.clientY - this.joy.oy;
         if (Math.hypot(e.clientX - this.joy.sx, e.clientY - this.joy.sy) > 10) this.joy.moved = true;
-        if (this.joy.moved) { const dpr = Math.min(2, devicePixelRatio || 1); this.scene?.panBy(dx * dpr, dy * dpr); this.joy.ox = e.clientX; this.joy.oy = e.clientY; }
+        if (this.joy.moved) { this.scene?.panBy(dx, dy); this.joy.ox = e.clientX; this.joy.oy = e.clientY; }
         return;
       }
       let dx = e.clientX - this.joy.ox, dy = e.clientY - this.joy.oy; const d = Math.hypot(dx, dy);
@@ -72,7 +72,7 @@ export class Hud {
       if (e.pointerId !== this.joy.id) return;
       const wasTap = this.build.active && !this.joy.moved;
       this.joy.on = false; this.input.x = this.input.y = 0; base.hidden = true;
-      if (wasTap && this.scene) { const dpr = Math.min(2, devicePixelRatio || 1); const p = this.scene.screenToWorld(e.clientX * dpr, e.clientY * dpr); this.buildTap(p.x, p.y); }
+      if (wasTap && this.scene) { const p = this.scene.screenToWorld(e.clientX, e.clientY); this.buildTap(p.x, p.y); }
     };
     area.addEventListener('pointerup', end); area.addEventListener('pointercancel', end);
   }
@@ -95,7 +95,8 @@ export class Hud {
     $('bBuild').onclick = () => (this.build.active ? this.exitBuild() : this.enterBuild());
     $('chip').onclick = () => { if (this.chipFor) this.openCard(this.chipFor); };
     $('bOk').onclick = () => this.confirmGhost();
-    $('bCancel').onclick = () => { if (this.build.ghost) { this.build.ghost = null; this.renderDrawer(); } else this.exitBuild(); };
+    $('bRing').onclick = () => this.ringTown();
+    $('bCancel').onclick = () => { if (this.build.ghost) { this.build.ghost = null; this.build.anchor = null; this.build.spots = []; this.renderDrawer(); } else this.exitBuild(); };
     $('mResume').onclick = () => this.toggleMenu(false);
     $('mMusic').onclick = () => { setMusic(!audio.music); saveSettings(audio); this.menuRefresh(); };
     $('mExport').onclick = () => { const code = exportCode(this.w), ta = $<HTMLTextAreaElement>('mCode'); ta.value = code; ta.select(); navigator.clipboard?.writeText(code).then(() => this.status('Код скопійовано. Збережи його в нотатках.'), () => this.status('Код виділено: скопіюй його вручну.')); };
@@ -133,7 +134,7 @@ export class Hud {
 
   // ---------------------------------------------------------------- per frame
   frame(dt: number) {
-    if (this.scene) { const sc = this.scene; THUMB = k => sc.thumb(k, 28); }
+    if (this.scene) { const sc = this.scene; THUMB = k => sc.thumb(k, 30); }
     if (!this.started) return;
     this.readKeys();
     const w = this.w;
@@ -158,7 +159,7 @@ export class Hud {
     // info chip near a building (cards open only on tap)
     const nb = this.build.active ? null : nearBuilding(w);
     const chipId = nb?.id ?? null;
-    if (chipId !== this.chipFor) { this.chipFor = chipId; const el = $('chip'); el.hidden = !nb; if (nb) el.innerHTML = `${bIcon(nb.type, 'ico big')}<span>${BUILD[nb.type].name}${nb.site ? ' · будова' : ''}</span>`; }
+    if (chipId !== this.chipFor) { this.chipFor = chipId; const el = $('chip'); el.hidden = !nb; if (nb) el.innerHTML = `${bIcon(nb.type, 'ico lg')}<span>${BUILD[nb.type].name}${nb.site ? ' · будова' : ''}</span>`; }
     if (this.cardFor) {
       const b = w.buildings[this.cardFor];
       if (!b || (!this.build.active && dist(w.hero.x, w.hero.y, b.x, b.y) > BUILD[b.type].r + 140)) this.closeCard();
@@ -188,7 +189,7 @@ export class Hud {
     const def = BUILD[b.type];
     const close = this.h('button', 'x'); close.innerHTML = G.close; close.setAttribute('aria-label', 'Закрити'); close.onclick = () => this.closeCard(); el.append(close);
     const stars = def.levels && !b.site ? ' ' + '★'.repeat(b.level) + '☆'.repeat(def.levels.length - b.level) : '';
-    const h2 = this.h('h2'); h2.innerHTML = `${bIcon(b.type, 'ico big')}<span>${def.name}<small>${stars}</small></span>`; el.append(h2);
+    const h2 = this.h('h2'); h2.innerHTML = `${bIcon(b.type, 'ico lg')}<span>${def.name}<small>${stars}</small></span>`; el.append(h2);
     if (b.site) {
       el.append(this.h('p', 'sub', 'Будується'));
       const rows = this.h('div', 'rows');
@@ -206,7 +207,7 @@ export class Hud {
     }
     if (this.build.active && !def.noBuild) {
       const r = this.h('div', 'mrow');
-      r.append(this.btn(`${G.move} Перемістити`, null, () => { this.build.ghost = { type: b.type, x: b.x, y: b.y, ok: true, moving: b.id }; this.closeCard(); this.renderDrawer(); return false; }, false, 'ubtn ghost'));
+      r.append(this.btn(`${G.move} Перемістити`, null, () => { this.build.ghost = { type: b.type, x: b.x, y: b.y, ok: true, moving: b.id }; this.build.spots = validSpots(w, b.type, b.id); this.closeCard(); this.renderDrawer(); return false; }, false, 'ubtn ghost'));
       const dz = this.btn(`${G.trash} Знести`, null, () => { if (this.armDemolish !== b.id) { this.armDemolish = b.id; dz.querySelector('span')!.innerHTML = `${G.trash} Точно знести? +50% монет`; dz.classList.add('danger'); return false; } demolish(w, b); this.armDemolish = null; this.closeCard(); return false; }, false, 'ubtn ghost');
       r.append(dz);
       el.append(r);
@@ -239,7 +240,7 @@ export class Hud {
       return;
     }
     if (b.type === 'hall') {
-      rows.append(this.row('Межі містечка', `${levelStats(b).radius} кроків`));
+      rows.append(this.row('Межі містечка', `${levelStats(b).half * 2} × ${levelStats(b).half * 2} клітин`));
       rows.append(this.row('Затишок', `${comfort(w)} (котики +${Math.min(30, comfort(w) * 2)}%)`));
       el.append(rows);
       const pr = PROJECTS.hedge;
@@ -255,9 +256,9 @@ export class Hud {
     }
     if (b.type === 'barracks') {
       rows.append(this.row('Воїнів', `${w.units.length} / ${unitCap(w)}`)); rows.append(this.row('Стан', b.status || '—'));
-      if (b.queue?.length) rows.append(this.row('Черга', b.queue.map(k => pic('cat_' + k)).join(' ')));
+      if (b.queue?.length) rows.append(this.row('Черга', b.queue.map(k => pic('u:' + k)).join(' ')));
       el.append(rows);
-      for (const [k, u] of Object.entries(UNITS) as [keyof typeof UNITS, (typeof UNITS)[keyof typeof UNITS]][]) el.append(this.btn(`${pic('cat_' + k)} Навчити: ${u.name}`, u.cost, () => trainUnit(w, b, k)));
+      for (const [k, u] of Object.entries(UNITS) as [keyof typeof UNITS, (typeof UNITS)[keyof typeof UNITS]][]) el.append(this.btn(`${pic('u:' + k)} Навчити: ${u.name}`, u.cost, () => trainUnit(w, b, k)));
       el.append(this.h('p', 'tip', 'Постав 🚩 Пости варти і признач на кожен потрібну кількість воїнів. Поранені лікуються тут.'));
       return;
     }
@@ -265,7 +266,7 @@ export class Hud {
       const free = (k: string) => w.units.filter(u => u.kind === k).length;
       for (const k of ['spear', 'sling'] as const) {
         const r = this.h('div', 'urow');
-        const ic = this.h('div', 'ic'); ic.innerHTML = pic('cat_' + k, 'ico big'); r.append(ic);
+        const ic = this.h('div', 'ic'); ic.innerHTML = pic('u:' + k, 'ico lg'); r.append(ic);
         const mid = this.h('div'); mid.append(this.h('div', 'nm', UNITS[k].name), this.h('div', 'ds', `тут ${w.units.filter(u => u.post === b.id && u.kind === k).length} · хочу ${b.want![k]} · усього в загоні ${free(k)}`)); r.append(mid);
         const pm = this.h('div', 'pm');
         const minus = this.h('button', 'segb', '−') as HTMLButtonElement; minus.onclick = () => { b.want![k] = Math.max(0, b.want![k] - 1); this.cardSig = ''; this.renderCard(true); };
@@ -293,7 +294,7 @@ export class Hud {
       if (u.req && !w.flags[u.req]) continue;
       const lv = w.up[u.id], max = u.costs.length;
       const row = this.h('div', 'urow');
-      const ic = this.h('div', 'ic'); ic.innerHTML = UPG_ICON[u.id] || pic(u.id === 'axe' ? 'w_saw' : 'hero_leg', 'ico big'); row.append(ic);
+      const ic = this.h('div', 'ic'); ic.innerHTML = UPG_ICON[u.id] || pic(u.id === 'axe' ? 'w:axe' : 'hero', 'ico lg'); row.append(ic);
       const mid = this.h('div'); mid.append(this.h('div', 'nm', u.name), this.h('div', 'ds', lv >= max ? 'Максимум!' : u.desc(lv)));
       const lvl = this.h('div', 'lv'); for (let i = 0; i < max; i++) lvl.append(this.h('i', i < lv ? 'on' : '')); mid.append(lvl);
       row.append(mid, lv >= max ? this.btn(G.check, null, () => false, true) : this.btn('', u.costs[lv], () => heroUpgrade(w, u.id)));
@@ -302,62 +303,93 @@ export class Hud {
   }
 
   // ---------------------------------------------------------------- build mode
-  enterBuild() { this.build.active = true; this.build.ghost = null; this.build.selected = null; document.body.classList.add('building'); this.closeCard(); this.renderDrawer(); }
-  exitBuild() { this.build.active = false; this.build.ghost = null; this.build.selected = null; document.body.classList.remove('building'); $('drawer').classList.remove('on'); this.closeCard(); this.scene?.focus(); }
+  enterBuild() { this.build.active = true; this.build.ghost = null; this.build.selected = null; this.build.anchor = null; this.build.spots = []; document.body.classList.add('building'); this.closeCard(); this.renderDrawer(); }
+  exitBuild() { this.build.active = false; this.build.ghost = null; this.build.selected = null; this.build.anchor = null; this.build.spots = []; document.body.classList.remove('building'); $('drawer').classList.remove('on'); this.closeCard(); this.scene?.focus(); }
   private renderDrawer() {
-    const w = this.w, d = $('drawer'); d.classList.add('on');
-    $('bOk').hidden = !this.build.ghost;
-    $('buildHint').textContent = this.build.ghost
-      ? (this.build.ghost.moving ? 'Торкнись нового місця і підтверди' : 'Торкнись мапи, щоб поставити. Тягни пальцем, щоб рухати камеру.')
-      : 'Обери будівлю. Або торкнись будівлі на мапі, щоб перемістити чи знести.';
+    const w = this.w, d = $('drawer'), g = this.build.ghost; d.classList.add('on');
+    $('bOk').hidden = !g;
+    const cont = g && BUILD[g.type].continuous && !g.moving;
+    $('buildHint').textContent = !g ? 'Обери будівлю. Або торкнись будівлі на мапі, щоб перемістити чи знести.'
+      : g.moving ? 'Торкнись нової клітинки і підтверди. Зелене: сюди влізе.'
+      : cont ? (this.build.anchor ? 'Торкнись кінця лінії, потім «Поставити». Або обнеси все містечко.' : 'Торкнись початку лінії частоколу.')
+      : 'Зелені клітинки: сюди влізе. Жовті лишаються проходом. Тягни пальцем, щоб рухати камеру.';
     const tabs = $('tabs'); tabs.innerHTML = '';
     for (const c of CATEGORIES) { const b = this.h('button', 'tab' + (this.build.cat === c.id ? ' on' : '')); b.innerHTML = `${G[c.id as keyof typeof G]}<span>${c.name}</span>`; b.onclick = () => { this.build.cat = c.id; this.renderDrawer(); }; tabs.append(b); }
     const list = $('blist'); list.innerHTML = '';
     for (const [type, def] of Object.entries(BUILD) as [BuildingType, (typeof BUILD)[BuildingType]][]) {
       if (def.cat !== this.build.cat || def.noBuild) continue;
       const lock = buildLock(w, type), afford = w.coins >= (def.cost.coins || 0);
-      const card = this.h('button', 'bitem' + (lock ? ' locked' : !afford ? ' poor' : '') + (this.build.ghost?.type === type && !this.build.ghost.moving ? ' on' : '')) as HTMLButtonElement;
+      const card = this.h('button', 'bitem' + (lock ? ' locked' : !afford ? ' poor' : '') + (g?.type === type && !g.moving ? ' on' : '')) as HTMLButtonElement;
       const max = def.max?.[hallLevel(w) - 1];
       card.innerHTML = `<div class="bi">${bIcon(type, 'thumb')}</div><div class="bn">${def.name}</div><div class="bc">${lock ? G.lock + ' ' + lock : costLine(def.cost)}</div>${max !== undefined && !lock ? `<div class="bm">${count(w, type)}/${max}</div>` : ''}`;
       card.disabled = !!lock;
       card.title = def.desc;
       card.onclick = () => {
         if (!afford) { this.toast('Бракує монет', `${def.name}: потрібно ${def.cost.coins} монет. Матеріали можна довезти потім.`); return; }
+        this.build.spots = validSpots(w, type); this.build.anchor = null;
         const spot = this.freeSpot(type); this.build.ghost = { type, x: spot.x, y: spot.y, ok: false }; this.build.selected = null; this.closeCard(); this.renderDrawer(); this.updateGhost(); sfx('pick');
       };
       list.append(card);
     }
-    const gd = this.build.ghost ? BUILD[this.build.ghost.type] : null;
-    $('bdesc').textContent = gd ? `${gd.name}: ${gd.desc}` : '';
+    const gd = g ? BUILD[g.type] : null;
+    $('bdesc').innerHTML = gd ? `<b>${gd.name}.</b> ${gd.desc}` : '';
+    const ring = $('bRing'); ring.hidden = !cont;
   }
-  /** Nearest valid spot around the hero, spiralling outwards, so a new ghost never starts red. */
+  /** Nearest spot where the building fits, so a new ghost starts green. */
   private freeSpot(type: BuildingType): { x: number; y: number } {
-    const h = this.w.hero;
-    for (let r = 70; r < 520; r += 26) for (let a = 0; a < Math.PI * 2; a += 0.35) { const x = Math.round(h.x + Math.cos(a - 1.57) * r), y = Math.round(h.y + Math.sin(a - 1.57) * r * 0.8); if (!placeCheck(this.w, type, x, y)) return { x, y }; }
-    return { x: Math.round(h.x), y: Math.round(h.y - 90) };
+    const h = this.w.hero; let best = null as null | { x: number; y: number }, bd = 1e9;
+    for (const s of this.build.spots) { const d = dist(h.x, h.y - 60, s.x, s.y); if (d < bd) { bd = d; best = s; } }
+    return best ?? snap(type, h.x, h.y - 100);
   }
   private buildTap(x: number, y: number) {
-    const w = this.w;
-    if (this.build.ghost) { this.build.ghost.x = Math.round(x); this.build.ghost.y = Math.round(y); this.updateGhost(); sfx('drop'); return; }
+    const w = this.w, g = this.build.ghost;
+    if (g) {
+      if (BUILD[g.type].continuous && !g.moving) {
+        const p = snap(g.type, x, y);
+        if (!this.build.anchor) { this.build.anchor = p; g.x = p.x; g.y = p.y; g.line = undefined; }
+        else g.line = lineCells(this.build.anchor, p).map(c => ({ ...c, ok: false }));
+        this.updateGhost(); this.renderDrawer(); sfx('drop'); return;
+      }
+      const p = snap(g.type, x, y); g.x = p.x; g.y = p.y; this.updateGhost(); sfx('drop'); return;
+    }
     let best: Building | null = null, bd = 1e9;
-    for (const b of Object.values(w.buildings)) { const d = dist(x, y, b.x, b.y - 20); if (d < BUILD[b.type].r + 26 && d < bd) { bd = d; best = b; } }
+    for (const b of Object.values(w.buildings)) { const r = BUILD[b.type].r; if (Math.abs(x - b.x) < r + 8 && Math.abs(y - b.y) < r + 8) { const d = dist(x, y, b.x, b.y); if (d < bd) { bd = d; best = b; } } }
     this.build.selected = best?.id ?? null;
     if (best) this.openCard(best.id); else this.closeCard();
   }
-  private updateGhost() {
+  private ringTown() {
     const g = this.build.ghost; if (!g) return;
-    g.ok = !(g.moving ? placeCheck(this.w, g.type, g.x, g.y, g.moving) : placeCheck(this.w, g.type, g.x, g.y) || buildLock(this.w, g.type));
-    const btn = $<HTMLButtonElement>('bOk'); btn.disabled = !g.ok;
-    const why = g.moving ? placeCheck(this.w, g.type, g.x, g.y, g.moving) : placeCheck(this.w, g.type, g.x, g.y) || buildLock(this.w, g.type);
+    g.line = perimeterCells(this.w).map(c => ({ ...c, ok: false })); this.build.anchor = { x: g.x, y: g.y };
+    this.updateGhost(); this.renderDrawer();
+  }
+  private updateGhost() {
+    const g = this.build.ghost, w = this.w; if (!g) return;
+    let why: string | null;
+    if (g.line) {
+      // a line: count what is affordable and fits; segments are checked one by one
+      const def = BUILD[g.type], each = def.cost.plank || 0; let fits = 0;
+      for (const p of g.line) { p.ok = !placeCheck(w, g.type, p.x, p.y); if (p.ok) fits++; }
+      const lock = buildLock(w, g.type), max = def.max?.[hallLevel(w) - 1] ?? 999, room = Math.max(0, max - count(w, g.type));
+      g.ok = !lock && fits > 0 && room > 0;
+      why = lock || (fits === 0 ? 'Тут не стане жодної секції' : room < fits ? `Поставиться ${room} з ${fits}: ліміт Ратуші` : `${fits} секцій · ${each * fits} дощок довезуть котики`);
+      if (g.ok && !lock) { $('ghostWhy').classList.add('ok'); } else $('ghostWhy').classList.remove('ok');
+    } else {
+      why = g.moving ? placeCheck(w, g.type, g.x, g.y, g.moving) : placeCheck(w, g.type, g.x, g.y) || buildLock(w, g.type);
+      g.ok = !why; $('ghostWhy').classList.remove('ok');
+    }
+    $<HTMLButtonElement>('bOk').disabled = !g.ok;
     $('ghostWhy').textContent = why || '';
-    this.build.why = why || '';
+    this.build.why = g.line ? '' : why || '';
   }
   private confirmGhost() {
     const g = this.build.ghost, w = this.w; if (!g || !g.ok) return;
-    if (g.moving) { const b = w.buildings[g.moving]; if (b && moveBuilding(w, b, g.x, g.y)) { this.build.ghost = null; this.build.selected = b.id; } }
-    else {
+    if (g.moving) { const b = w.buildings[g.moving]; if (b && moveBuilding(w, b, g.x, g.y)) { this.build.ghost = null; this.build.selected = b.id; this.build.spots = []; } }
+    else if (g.line) {
+      for (const p of g.line) if (p.ok && !buildLock(w, g.type) && w.coins >= (BUILD[g.type].cost.coins || 0)) place(w, g.type, p.x, p.y);
+      g.line = undefined; this.build.anchor = null; this.build.spots = validSpots(w, g.type); this.updateGhost();
+    } else {
       const b = place(w, g.type, g.x, g.y);
-      if (b) { const def = BUILD[g.type]; if (def.continuous && !buildLock(w, g.type) && w.coins >= (def.cost.coins || 0)) { g.x += def.r * 2 - 4; this.updateGhost(); } else this.build.ghost = null; }
+      if (b) { this.build.spots = validSpots(w, g.type); if (!buildLock(w, g.type) && w.coins >= (BUILD[g.type].cost.coins || 0) && this.build.spots.length) { const s = this.freeSpot(g.type); g.x = s.x; g.y = s.y; this.updateGhost(); } else { this.build.ghost = null; this.build.spots = []; } }
     }
     this.renderDrawer();
   }
