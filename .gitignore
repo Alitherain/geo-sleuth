@@ -5,3 +5,4 @@ __pycache__/
 board.json
 intake/
 rev/
+.impeccable/live/
