@@ -4,7 +4,7 @@
 // so two cats never chase the same goods and a cat finishes the trip it started.
 import { BUILD, ITEMS, type GatherKind, type ItemId } from '../content/data';
 import { collide, walkTo } from './physics';
-import { allOf, available, catBoost, catCap, catSpeed, dist, invAdd, invGet, nodeOpen, procStats, storageFree, type Building, type Cat, type P, type ResNode, type World } from './world';
+import { heroCap, allOf, available, catBoost, catCap, catSpeed, dist, invAdd, invGet, nodeOpen, procStats, storageFree, type Building, type Cat, type P, type ResNode, type World } from './world';
 import { addFuel, deliverToSite, sell } from './economy';
 
 // ---------------------------------------------------------------- endpoints: "<buildingId>|<part>"
@@ -250,7 +250,7 @@ export function harvestNode(w: World, n: ResNode, by: Cat | 'hero', dmg = 1) {
   n.regrow = n.kind === 'lav' ? 45 : n.kind === 'rock' ? 70 : n.kind === 'bush' ? 35 : 28;
   w.stats.felled++;
   w.events.push({ t: 'fell', x: n.x, y: n.y, kind: n.kind });
-  const holder = by === 'hero' ? w.hero : by, cap = by === 'hero' ? 12 + w.up.bag * 6 : catCap(w, by);
+  const holder = by === 'hero' ? w.hero : by, cap = by === 'hero' ? heroCap(w) : catCap(w, by);
   for (let i = 0; i < n.yield; i++) {
     if (holder.stack.length < cap) { holder.stack.push(n.item); w.events.push({ t: 'fly', item: n.item, fx: n.x, fy: n.y, fz: 20, to: by === 'hero' ? 'hero' : by.id }); }
     else w.ground.push({ id: w.nextId++, type: n.item, x: n.x + (Math.random() - 0.5) * 50, y: n.y + (Math.random() - 0.3) * 30, z: 30, vz: 100, age: 0 });

@@ -4,7 +4,8 @@ import * as THREE from 'three';
 import { BUILD, CELL, EDGE, GROVE, HEDGE_X, HILLS, ITEMS, MEADOW, ROAD_Y, SPAWNS, TC, W, H, WILDS, type BuildingType, type ItemId } from '../content/data';
 import { dist, hallLevel, invTotal, lightRadius, type Building, type GameEvent, type World } from '../sim/world';
 import { areaHalf, footprint, occupancy, padRow, townHalf } from '../sim/grid';
-import { C, ITEM_H, MAT, buildingModel, catRig, enemyModel, heroRig, itemModel, nodeModel, padTexture, propGeo, toolModel, type Rig } from './models';
+import { C, ITEM_H, MAT, addGrain, buildingModel, catRig, enemyModel, heroRig, itemModel, nodeModel, padTexture, plotTexture, propGeo, toolModel, type Rig } from './models';
+import { offerCost } from '../sim/town';
 import { sfx } from '../platform/audio';
 
 const U = 1 / CELL;
@@ -77,6 +78,7 @@ export class View {
   hemi: THREE.HemisphereLight; sun: THREE.DirectionalLight; fires: THREE.PointLight[] = []; heroLight: THREE.PointLight;
   groundCv = document.createElement('canvas'); groundTex: THREE.CanvasTexture; groundSig = '';
   hedge!: THREE.InstancedMesh;
+  zoom = 1; offers = new Map<number, { root: THREE.Group; fill: THREE.Mesh; label: HTMLDivElement; sig: string }>(); visitors = new Map<number, CharV>(); till = new THREE.Group(); tillN = -1;
   hero: CharV; cats = new Map<number, CharV>(); units = new Map<number, CharV>(); enemies = new Map<number, EV>();
   nodes = new Map<number, { obj: THREE.Group; alive: boolean; kind: string }>();
   buildings = new Map<string, BV>(); ground = new Map<number, THREE.Object3D>(); shots = new Map<number, THREE.Object3D>();
@@ -108,18 +110,19 @@ export class View {
     this.sun.shadow.bias = -0.0006; this.sun.shadow.normalBias = 0.03;
     this.scene.add(this.sun, this.sun.target);
     for (let i = 0; i < 8; i++) { const l = new THREE.PointLight(0xff9a4a, 0, 6, 1.4); this.scene.add(l); this.fires.push(l); }
-    this.heroLight = new THREE.PointLight(0xffc27a, 0, 4.5, 1.4); this.scene.add(this.heroLight);
+    this.heroLight = new THREE.PointLight(0xffc27a, 0, 6, 1.3); this.scene.add(this.heroLight);
 
     // ground
-    this.groundCv.width = W / 2; this.groundCv.height = H / 2;
+    this.groundCv.width = W * 0.8; this.groundCv.height = H * 0.8;
     this.groundTex = new THREE.CanvasTexture(this.groundCv); this.groundTex.colorSpace = THREE.SRGBColorSpace; this.groundTex.anisotropy = 8;
-    const gm = new THREE.Mesh(new THREE.PlaneGeometry(W * U, H * U), new THREE.MeshLambertMaterial({ map: this.groundTex }));
+    const gm = new THREE.Mesh(new THREE.PlaneGeometry(W * U, H * U), addGrain(new THREE.MeshLambertMaterial({ map: this.groundTex }), 0.12));
     gm.rotation.x = -Math.PI / 2; gm.position.set(W * U / 2, 0, H * U / 2); gm.receiveShadow = true; this.scene.add(gm);
     const under = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), new THREE.MeshBasicMaterial({ color: 0x0e0f0e })); under.rotation.x = -Math.PI / 2; under.position.set(W * U / 2, -0.05, H * U / 2); this.scene.add(under);
     this.drawGround(); this.makeProps();
 
     this.hero = { rig: heroRig(), yaw: 0, lx: 0, ly: 0, tool: 'axe', stackSig: '', kind: 'hero' };
     this.scene.add(this.hero.rig.root);
+    this.scene.add(this.till);
     const soft = dotTexture(true), hard = dotTexture(false);
     this.spark = new Particles(this.scene, 500, 0.16, true, soft); this.chip = new Particles(this.scene, 500, 0.13, false, hard); this.smoke = new Particles(this.scene, 160, 1.1, false, soft);
 
@@ -155,10 +158,10 @@ export class View {
   // ---------------------------------------------------------------- static ground
   drawGround() {
     const w = this.w, sig = hallLevel(w) + '|' + !!w.flags.hedge; if (sig === this.groundSig) return; this.groundSig = sig;
-    const c = this.groundCv.getContext('2d')!, S = 0.5;
+    const c = this.groundCv.getContext('2d')!, S = 0.8;
     let seed = 99; const r = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
     c.fillStyle = '#273024'; c.fillRect(0, 0, W * S, H * S);
-    for (let i = 0; i < 2600; i++) { const x = r() * W * S, y = r() * H * S, s = 4 + r() * 18; c.fillStyle = `rgba(${r() < 0.5 ? '18,24,16' : '52,62,44'},${0.08 + r() * 0.12})`; c.beginPath(); c.ellipse(x, y, s, s * 0.6, r() * 3, 0, Math.PI * 2); c.fill(); }
+    for (let i = 0; i < 5200; i++) { const x = r() * W * S, y = r() * H * S, s = 5 + r() * 26; c.fillStyle = `rgba(${r() < 0.5 ? '18,24,16' : '52,62,44'},${0.08 + r() * 0.12})`; c.beginPath(); c.ellipse(x, y, s, s * 0.6, r() * 3, 0, Math.PI * 2); c.fill(); }
     const zone = (R: { x: number; y: number; w: number; h: number }, col: string) => { c.fillStyle = col; c.beginPath(); (c as any).roundRect((R.x - 40) * S, (R.y - 40) * S, (R.w + 80) * S, (R.h + 80) * S, 40); c.fill(); };
     zone(EDGE, 'rgba(16,24,16,0.35)'); zone(GROVE, w.flags.hedge ? 'rgba(52,40,66,0.45)' : 'rgba(20,22,26,0.5)'); zone(HILLS, 'rgba(90,86,76,0.4)'); zone(MEADOW, 'rgba(70,80,52,0.3)');
     c.fillStyle = 'rgba(36,28,40,0.75)'; c.beginPath(); (c as any).roundRect((WILDS.x - 30) * S, 40 * S, (W - WILDS.x + 60) * S, (H - 60) * S, 60); c.fill();
@@ -171,7 +174,7 @@ export class View {
     for (let i = -T; i < T; i++) for (let j = -T; j < T; j++) {
       const rd = i === -1 || i === 0 || j === -1 || j === 0, cx = (TC.x + i * CELL) * S, cy = (TC.y + j * CELL) * S, q = CELL * S;
       c.fillStyle = rd ? '#4a4237' : '#3e3a33'; c.fillRect(cx, cy, q, q);
-      for (let a = 0; a < 2; a++) for (let b = 0; b < 2; b++) { const t = r(); c.fillStyle = rd ? (t < 0.5 ? '#5a5144' : '#52493d') : (t < 0.5 ? '#4b463e' : '#45403a'); c.beginPath(); (c as any).roundRect(cx + a * q / 2 + 1.2, cy + b * q / 2 + 1.2, q / 2 - 2.4, q / 2 - 2.4, 3); c.fill(); }
+      for (let a = 0; a < 2; a++) for (let b = 0; b < 2; b++) { const t = r(); const sx = cx + a * q / 2 + 1.5, sy = cy + b * q / 2 + 1.5, sw = q / 2 - 3; c.fillStyle = rd ? (t < 0.5 ? '#5e5547' : '#554c40') : (t < 0.5 ? '#4e4940' : '#47423b'); c.beginPath(); (c as any).roundRect(sx, sy, sw, sw, 4); c.fill(); c.fillStyle = 'rgba(255,240,210,0.06)'; c.fillRect(sx + 2, sy + 2, sw - 6, 3); c.fillStyle = 'rgba(0,0,0,0.18)'; c.fillRect(sx + 2, sy + sw - 3, sw - 4, 2); }
       c.strokeStyle = 'rgba(20,16,12,0.35)'; c.lineWidth = 1; c.strokeRect(cx + 0.5, cy + 0.5, q - 1, q - 1);
     }
     c.strokeStyle = '#1a1714'; c.lineWidth = 3; c.strokeRect((x0 - 6) * S, (y0 - 6) * S, (side + 12) * S, (side + 12) * S);
@@ -216,7 +219,7 @@ export class View {
   frame(dt: number) {
     this.elapsed += dt; this.w = this.getWorld();
     this.drawGround();
-    this.syncNodes(); this.syncBuildings(dt); this.syncChars(dt); this.syncEnemies(dt); this.syncMisc(dt);
+    this.syncNodes(); this.syncBuildings(dt); this.syncChars(dt); this.syncEnemies(dt); this.syncMisc(dt); this.syncTown(dt);
     this.updateBuild(); this.updateFx(dt); this.ambient(dt); this.updateLight(); this.updateCamera(dt);
     this.renderer.render(this.scene, this.camera);
     this.updateLabels(dt);
@@ -415,6 +418,50 @@ export class View {
     });
   }
 
+  // ---------------------------------------------------------------- price plots, customers, the till
+  syncTown(dt: number) {
+    const w = this.w, t = this.elapsed, seen = new Set<number>();
+    for (const o of w.offers) {
+      seen.add(o.id); const fp = BUILD[o.type].fp || 1;
+      let v = this.offers.get(o.id);
+      if (!v) {
+        const root = new THREE.Group();
+        const plot = new THREE.Mesh(new THREE.PlaneGeometry(fp, fp).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: plotTexture(), transparent: true, depthWrite: false })); plot.position.y = 0.04;
+        const fill = new THREE.Mesh(new THREE.PlaneGeometry(fp * 0.86, fp * 0.86).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xd9b25a, transparent: true, opacity: 0.35, depthWrite: false })); fill.position.y = 0.05;
+        const ghost = buildingModel(o.type, 1, fp).group; ghost.traverse(m => { const mesh = m as THREE.Mesh; if (mesh.isMesh) { mesh.material = new THREE.MeshLambertMaterial({ color: 0xe8d8b0, transparent: true, opacity: 0.16, depthWrite: false }); mesh.castShadow = false; } });
+        root.add(plot, fill, ghost); this.scene.add(root);
+        const label = this.ov.make('plot'); v = { root, fill, label, sig: '' }; this.offers.set(o.id, v);
+      }
+      v.root.position.set(o.x * U, 0, o.y * U);
+      const cost = offerCost(o), k = cost ? o.paid / cost : 1;
+      v.fill.scale.set(1, 1, Math.max(0.001, k)); v.fill.position.z = (fp * 0.86) * (k - 1) / 2;
+      (v.root.children[2] as THREE.Object3D).position.y = Math.sin(t * 2.5) * 0.04;
+      const sig = BUILD[o.type].name + (cost - o.paid);
+      if (sig !== v.sig) { v.sig = sig; v.label.innerHTML = `<small>${BUILD[o.type].name}</small><b><span class="coin"></span>${cost - o.paid}</b>`; }
+      this.place(v.label, o.x, o.y, 0.35);
+    }
+    for (const [id, v] of this.offers) if (!seen.has(id)) { this.scene.remove(v.root); this.ov.free(v.label); this.offers.delete(id); }
+    // customers
+    const vs = new Set<number>();
+    for (const c of w.visitors) {
+      vs.add(c.id);
+      let v = this.visitors.get(c.id);
+      if (!v) { v = { rig: catRig('visitor' + c.look), yaw: 0, lx: c.x, ly: c.y, tool: '', stackSig: '', kind: 'visitor' }; this.scene.add(v.rig.root); this.visitors.set(c.id, v); }
+      const vx = (c.x - v.lx) / Math.max(dt, 1e-3), vy = (c.y - v.ly) / Math.max(dt, 1e-3); v.lx = c.x; v.ly = c.y;
+      this.animRig(v, { ...c, swing: 0 }, c.moving ? vx : 0, c.moving ? vy : 0, dt, 0.6);
+      if (!c.moving && c.state === 'wait') v.yaw = angLerp(v.yaw, Math.PI, Math.min(1, dt * 6));
+      const want = c.state === 'leave' ? null : `${c.want}|${c.n}|${c.patience < c.maxPatience * 0.3 ? 1 : 0}`;
+      if (!want) this.bubble(v, null);
+      else if (v.bubbleText !== want) { if (!v.bubble) v.bubble = this.ov.make('bub want'); v.bubbleText = want; v.bubble.innerHTML = `<img src="${this.thumb('i:' + c.want, 22)}" alt="">×${c.n}`; v.bubble.classList.toggle('low', c.patience < c.maxPatience * 0.3); }
+      if (v.bubble) this.place(v.bubble, c.x, c.y, 1.3);
+    }
+    for (const [id, v] of this.visitors) if (!vs.has(id)) { this.scene.remove(v.rig.root); this.bubble(v, null); this.visitors.delete(id); }
+    // coins on the counter
+    const shop = w.buildings.shop, n = shop ? Math.min(36, Math.ceil(w.till / 3)) : 0;
+    if (n !== this.tillN) { this.tillN = n; this.till.clear(); for (let i = 0; i < n; i++) { const m = itemModel('coin'); m.rotation.x = -Math.PI / 2; m.position.set((Math.floor(i / 12) - 1) * 0.24, 0.82 + (i % 12) * 0.035, 0); this.till.add(m); } }
+    if (shop) this.till.position.set(shop.x * U + 0.55, 0, shop.y * U + 0.45);
+  }
+
   // ---------------------------------------------------------------- build mode
   updateBuild() {
     const st = this.getBuild(), w = this.w;
@@ -474,9 +521,9 @@ export class View {
     };
     switch (e.t) {
       case 'fly': {
-        const owner = e.to === 'hero' ? 'hero' : typeof e.to === 'number' ? 'c' + e.to : undefined;
+        const owner = e.item === 'coin' ? undefined : e.to === 'hero' ? 'hero' : typeof e.to === 'number' ? 'c' + e.to : undefined;
         if (owner) this.pending[owner] = (this.pending[owner] || 0) + 1;
-        const to = e.to === 'hero' ? () => this.stackTop('hero') : typeof e.to === 'number' ? (() => { const id = e.to as number; return () => this.stackTop('c' + id) ?? { x: e.fx, y: e.fy, z: 0 }; })() : (() => { const p = e.to as { x: number; y: number }; return () => ({ x: p.x, y: p.y, z: 10 }); })();
+        const to = e.to === 'hero' ? (e.item === 'coin' ? () => ({ x: w.hero.x, y: w.hero.y, z: 60 }) : () => this.stackTop('hero')) : typeof e.to === 'number' ? (() => { const id = e.to as number; return () => this.stackTop('c' + id) ?? { x: e.fx, y: e.fy, z: 0 }; })() : (() => { const p = e.to as { x: number; y: number }; return () => ({ x: p.x, y: p.y, z: 10 }); })();
         const obj = itemModel(e.item === 'coin' ? 'coin' : e.item); this.scene.add(obj);
         this.flyers.push({ obj, fx: e.fx, fy: e.fy, fz: e.fz, to: to as () => { x: number; y: number; z: number }, t: 0, dur: 0.3 + Math.random() * 0.06, h: 50, owner });
         break;
@@ -511,12 +558,22 @@ export class View {
       case 'lightOut': for (let i = 0; i < 3; i++) this.smoke.spawn(e.x * U + (Math.random() - 0.5) * 0.3, 0.5, e.y * U, 0.1, 0.4, 0, 2.4, 0x6a6670, 0, false, 0.5); break;
       case 'text': this.floatText(e.x, e.y, 40, e.s, 'plain', e.color); break;
       case 'bubble': {
-        const who = e.who, at = who === 'owl' ? (w.buildings.shop ? { x: w.buildings.shop.x, y: w.buildings.shop.y, z: 120 } : null) : (() => { const c = w.cats.find(x => x.id === who) || w.units.find(x => x.id === who); return c ? { x: c.x, y: c.y, z: 62 } : null; })();
+        const who = e.who, at = who === 'owl' ? (w.buildings.shop ? { x: w.buildings.shop.x, y: w.buildings.shop.y, z: 120 } : null) : (() => { const c = w.cats.find(x => x.id === who) || w.units.find(x => x.id === who) || w.visitors.find(x => x.id === who); return c ? { x: c.x, y: c.y, z: 62 } : null; })();
         if (at) { const el = this.ov.make('bub'); el.textContent = e.s; this.texts.push({ el, x: at.x, y: at.y, z: at.z, vz: 0, life: 2.2 }); }
         if (who !== 'owl') sfx('meow');
         break;
       }
       case 'bossIn': this.shake = 0.25; break;
+      case 'made': {
+        // sawdust from the blade, the product hops onto the output pile
+        const b = Object.values(w.buildings).find(x => x.x === e.x && x.y === e.y); if (!b || !near(e.x, e.y)) break;
+        burst(e.x, e.y, 40, 6, b.type === 'sawmill' ? 0xc8a070 : 0xe8d8b0, 1.4, 0.7, 5);
+        const fp = BUILD[b.type].fp || 1, obj = itemModel(e.kind as ItemId); this.scene.add(obj);
+        this.flyers.push({ obj, fx: e.x + 10, fy: e.y, fz: 40, to: () => ({ x: e.x + (fp / 2 + 0.3) * CELL, y: e.y + 10, z: 10 }), t: 0, dur: 0.45, h: 40 });
+        break;
+      }
+      case 'served': this.floatText(e.x, e.y, 110, '+' + e.v, 'coin'); burst(e.x, e.y, 60, 10, 0xd9b25a, 1.6, 0.8, 3, this.spark); sfx('coin'); break;
+      case 'unlock': burst(e.x, e.y, 10, 26, 0xd9b25a, 3, 1, 3, this.spark); this.shake = Math.max(this.shake, 0.12); sfx('build'); break;
     }
   }
   private stackTop(owner: string): { x: number; y: number; z: number } {
@@ -557,11 +614,11 @@ export class View {
   updateLight() {
     const w = this.w, dark = w.clock.dark, t = this.elapsed;
     const dusk = w.clock.phase === 'dusk' ? Math.sin(Math.min(1, w.clock.t / 25) * Math.PI) : 0;
-    this.hemi.intensity = lerp(1.05, 0.16, dark); this.hemi.color.setRGB(lerp(0.78, 0.36, dark) + dusk * 0.12, lerp(0.76, 0.4, dark), lerp(0.7, 0.55, dark));
-    this.sun.intensity = lerp(1.7, 0.28, dark);
-    this.sun.color.setRGB(lerp(0.9, 0.42, dark) + dusk * 0.35, lerp(0.86, 0.48, dark) - dusk * 0.1, lerp(0.78, 0.7, dark) - dusk * 0.2);
+    this.hemi.intensity = lerp(1.05, 0.55, dark); this.hemi.color.setRGB(lerp(0.78, 0.36, dark) + dusk * 0.12, lerp(0.76, 0.4, dark), lerp(0.7, 0.55, dark));
+    this.sun.intensity = lerp(1.7, 0.75, dark);
+    this.sun.color.setRGB(lerp(0.9, 0.46, dark) + dusk * 0.35, lerp(0.86, 0.56, dark) - dusk * 0.1, lerp(0.78, 0.86, dark) - dusk * 0.2);
     this.sun.position.set(this.target.x - 8, 13, this.target.z + 11); this.sun.target.position.copy(this.target);
-    const bg = new THREE.Color().setRGB(lerp(0.12, 0.03, dark) + dusk * 0.06, lerp(0.12, 0.03, dark), lerp(0.11, 0.045, dark));
+    const bg = new THREE.Color().setRGB(lerp(0.12, 0.05, dark) + dusk * 0.06, lerp(0.12, 0.055, dark), lerp(0.11, 0.08, dark));
     (this.scene.background as THREE.Color).copy(bg); (this.scene.fog as THREE.Fog).color.copy(bg);
     MAT.win.color.setScalar(lerp(0.45, 1.25, Math.min(1, dark * 1.4)));
     this.renderer.toneMappingExposure = lerp(1.15, 1.3, dark);
@@ -571,17 +628,18 @@ export class View {
       const b = lit[i]; if (!b) { l.intensity = 0; return; }
       const lan = b.type === 'lantern', r = lightRadius(b) * U;
       l.color.set(lan ? 0xffc27a : 0xff9446); l.distance = r * 1.35; l.position.set(b.x * U + (lan ? 0.4 : 0), lan ? 1.6 : 0.9, b.y * U);
-      l.intensity = (0.6 + dark * 5) * (b.type === 'heart' ? 1.4 : 1) * (0.92 + Math.sin(t * 9 + i * 2) * 0.05 + Math.sin(t * 23 + i) * 0.03);
+      l.intensity = (0.6 + dark * 6) * (b.type === 'heart' ? 1.4 : 1) * (0.92 + Math.sin(t * 9 + i * 2) * 0.05 + Math.sin(t * 23 + i) * 0.03);
     });
     const h = this.w.hero, lp = this.hero.rig.lantern!; lp.updateWorldMatrix(true, false);
-    this.heroLight.position.setFromMatrixPosition(lp.matrixWorld); this.heroLight.position.y += 0.2; this.heroLight.intensity = dark * 2.4 * (h.dead > 0 ? 0 : 1);
+    this.heroLight.position.setFromMatrixPosition(lp.matrixWorld); this.heroLight.position.y += 0.2; this.heroLight.intensity = dark * 3.4 * (h.dead > 0 ? 0 : 1);
   }
   updateCamera(dt: number) {
     const h = this.w.hero, aspect = innerWidth / innerHeight;
     this.shake = REDUCED ? 0 : Math.max(0, Math.min(this.shake, 0.35) - dt * 0.9);
     if (this.camFollow) { const tx = h.x * U + h.vx * U * 0.25, tz = h.y * U + h.vy * U * 0.2; this.target.x += (tx - this.target.x) * Math.min(1, dt * 5); this.target.z += (tz - this.target.z) * Math.min(1, dt * 5); }
-    const want = aspect < 1 ? 11 : 19, fovH = 2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(15)) * aspect);
-    const d = Math.max(20, want / 2 / Math.tan(fovH / 2)) * (this.getBuild().active ? 1.25 : 1);
+    // close like the ads: the hero is about a seventh of the screen; pinch or wheel to zoom out and plan
+    const want = aspect < 1 ? 7.5 : 12.5, fovH = 2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(15)) * aspect);
+    const d = Math.max(12, want / 2 / Math.tan(fovH / 2)) * this.zoom * (this.getBuild().active ? 1.5 : 1);
     const dir = new THREE.Vector3(0, 0.62, 0.78).normalize();
     this.camera.position.copy(this.target).addScaledVector(dir, d);
     this.camera.position.x += (Math.random() - 0.5) * this.shake; this.camera.position.y += (Math.random() - 0.5) * this.shake;
@@ -629,6 +687,7 @@ export class View {
     this.target.x = Math.max(4, Math.min(W * U - 4, this.target.x)); this.target.z = Math.max(4, Math.min(H * U - 4, this.target.z));
   }
   focus() { this.camFollow = true; }
+  zoomBy(f: number) { this.zoom = Math.max(0.65, Math.min(2.6, this.zoom * f)); }
 
   // ---------------------------------------------------------------- icons for the HTML UI
   private thumbR: THREE.WebGLRenderer | null = null; private thumbS: THREE.Scene | null = null; private thumbs = new Map<string, string>();

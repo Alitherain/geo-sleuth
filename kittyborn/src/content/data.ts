@@ -142,7 +142,7 @@ export const UNITS: Record<UnitKind, { name: string; icon: string; cost: Cost; t
 // ---------------------------------------------------------------- hero upgrades (forge)
 export interface HeroUpg { id: 'bag' | 'axe' | 'boots' | 'heart' | 'mint'; icon: string; name: string; desc: (lv: number) => string; costs: Cost[]; req?: string }
 export const HERO_UPG: HeroUpg[] = [
-  { id: 'bag', icon: '🎒', name: 'Бездонний рюкзак', desc: lv => `Місткість ${12 + lv * 6} → ${18 + lv * 6}`, costs: [{ coins: 25 }, { coins: 60, plank: 5 }, { coins: 130, plank: 10 }, { coins: 260, stone: 10 }, { coins: 520, lav: 12 }] },
+  { id: 'bag', icon: '🎒', name: 'Бездонний рюкзак', desc: lv => `Місткість ${20 + lv * 8} → ${28 + lv * 8}`, costs: [{ coins: 25 }, { coins: 60, plank: 5 }, { coins: 130, plank: 10 }, { coins: 260, stone: 10 }, { coins: 520, lav: 12 }] },
   { id: 'axe', icon: '🪓', name: 'Сокиропила', desc: lv => `Сила ×${(1 + lv * .6).toFixed(1)} → ×${(1 + (lv + 1) * .6).toFixed(1)}`, costs: [{ coins: 35 }, { coins: 80, plank: 5 }, { coins: 160, stone: 8 }, { coins: 320, lav: 8 }, { coins: 640, lav: 15 }] },
   { id: 'boots', icon: '👢', name: 'Чоботи-скороходи', desc: () => 'Швидкість +12%', costs: [{ coins: 30 }, { coins: 70 }, { coins: 150, plank: 8 }, { coins: 300, fluff: 8 }] },
   { id: 'heart', icon: '❤️', name: 'Міцне серденько', desc: lv => `Життя ${5 + lv} → ${6 + lv}`, costs: [{ coins: 50 }, { coins: 130, fluff: 5 }, { coins: 280, fluff: 10 }, { coins: 550, fluff: 20 }] },

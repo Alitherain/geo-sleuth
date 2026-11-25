@@ -20,8 +20,9 @@ const UPG_ICON: Record<string, string> = { bag: G.bag, axe: '', boots: '', heart
 const TUT: { text: string; done: (w: World) => boolean }[] = [
   { text: 'Підійди до дерева: сокира рубає сама', done: w => w.stats.felled > 0 },
   { text: 'Продай дрова Пані Сові на жовтому майданчику', done: w => w.stats.earned >= 6 },
-  { text: 'Відкрий будівництво → Котики і постав Хатку лісорубів', done: w => has(w, 'houseGatherer') },
-  { text: 'Постав Лісопилку: дошки потрібні для всього', done: w => has(w, 'sawmill') },
+  { text: 'Стань на пунктирну ділянку з ціною: монети підуть у будову', done: w => has(w, 'houseGatherer') },
+  { text: 'Наступна ділянка: Лісопилка. Дошки потрібні для всього', done: w => has(w, 'sawmill') },
+  { text: 'Біля Сови черга: стань на «Продати», віддай замовлене, забери монети з прилавка', done: w => w.stats.earned >= 60 },
   { text: 'Постав Костер: світло обпікає нічних звірів', done: w => has(w, 'bonfire') },
   { text: 'Огороди містечко частоколом перед першою ніччю', done: w => count(w, 'palisade') >= 3 },
 ];
@@ -47,16 +48,24 @@ export class Hud {
   // ---------------------------------------------------------------- pointer: joystick normally, pan + tap in build mode
   private bindPointer() {
     const area = $('game'), base = $('joyBase'), knob = $('joyKnob'), R = 60;
+    // two fingers = pinch zoom (cancels the joystick); wheel zooms too
+    const pts = new Map<number, { x: number; y: number }>(); let pinch = 0;
+    const spread = () => { const [a, b] = [...pts.values()]; return Math.hypot(a.x - b.x, a.y - b.y); };
+    area.addEventListener('wheel', e => { e.preventDefault(); this.scene?.zoomBy(e.deltaY > 0 ? 1.1 : 0.9); }, { passive: false });
+    area.addEventListener('pointerdown', e => { pts.set(e.pointerId, { x: e.clientX, y: e.clientY }); if (pts.size === 2) { pinch = spread(); this.joy.on = false; this.joy.moved = true; this.input.x = this.input.y = 0; base.hidden = true; } });
+    area.addEventListener('pointermove', e => { if (!pts.has(e.pointerId)) return; pts.set(e.pointerId, { x: e.clientX, y: e.clientY }); if (pts.size === 2 && pinch > 0) { const d = spread(); if (d > 10) { this.scene?.zoomBy(pinch / d); pinch = d; } } });
+    const lift = (e: PointerEvent) => { pts.delete(e.pointerId); if (pts.size < 2) pinch = 0; };
+    area.addEventListener('pointerup', lift); area.addEventListener('pointercancel', lift);
     area.addEventListener('pointerdown', e => {
       audioInit();
-      if (this.joy.on) return;
+      if (this.joy.on || pts.size > 1) return;
       this.joy = { on: true, id: e.pointerId, ox: e.clientX, oy: e.clientY, sx: e.clientX, sy: e.clientY, moved: false };
       try { area.setPointerCapture(e.pointerId); } catch { /* ignore */ }
       if (this.build.active) return;
       base.hidden = false; base.style.transform = `translate(${e.clientX}px, ${e.clientY}px)`; knob.style.transform = 'translate(0px,0px)';
     });
     area.addEventListener('pointermove', e => {
-      if (!this.joy.on || e.pointerId !== this.joy.id) return;
+      if (!this.joy.on || e.pointerId !== this.joy.id || pinch > 0) return;
       if (this.build.active) {
         const dx = e.clientX - this.joy.ox, dy = e.clientY - this.joy.oy;
         if (Math.hypot(e.clientX - this.joy.sx, e.clientY - this.joy.sy) > 10) this.joy.moved = true;

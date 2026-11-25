@@ -13,6 +13,19 @@ export const C = {
   bark: 0x3b2c22, fur: 0x2a2624, fur2: 0x3a3430, fire: 0xffa040, fire2: 0xffd27a, win: 0xffc469, iron: 0x2e2a27, bronze: 0x6e5530, water: 0x3a5a66,
 };
 
+const GRAIN_VS = (src: string) => src.replace('#include <common>', '#include <common>\nvarying vec3 vGrainPos;')
+  .replace('#include <begin_vertex>', '#include <begin_vertex>\n#ifdef USE_INSTANCING\nvGrainPos = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;\n#else\nvGrainPos = (modelMatrix * vec4(transformed, 1.0)).xyz;\n#endif');
+const GRAIN_FS = (src: string, k: number) => src.replace('#include <common>', `#include <common>
+varying vec3 vGrainPos;
+float gHash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+float gNoise(vec3 x) { vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(gHash(i), gHash(i + vec3(1,0,0)), f.x), mix(gHash(i + vec3(0,1,0)), gHash(i + vec3(1,1,0)), f.x), f.y),
+             mix(mix(gHash(i + vec3(0,0,1)), gHash(i + vec3(1,0,1)), f.x), mix(gHash(i + vec3(0,1,1)), gHash(i + vec3(1,1,1)), f.x), f.y), f.z); }`)
+  .replace('#include <color_fragment>', `#include <color_fragment>
+  float gN = gNoise(vGrainPos * 9.0) * 0.55 + gNoise(vGrainPos * 31.0) * 0.45;
+  diffuseColor.rgb *= ${(1 - k).toFixed(2)} + ${(2 * k).toFixed(2)} * gN;`);
+export function addGrain(m: THREE.Material, k = 0.16) { m.onBeforeCompile = sh => { sh.vertexShader = GRAIN_VS(sh.vertexShader); sh.fragmentShader = GRAIN_FS(sh.fragmentShader, k); }; m.customProgramCacheKey = () => 'grain' + k; return m; }
+
 export const MAT = {
   body: new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }),
   glow: new THREE.MeshBasicMaterial({ vertexColors: true }),
@@ -21,6 +34,7 @@ export const MAT = {
   flame2: new THREE.MeshBasicMaterial({ color: 0xffa83a, transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending, depthWrite: false }),
   cloth: new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }),
 };
+addGrain(MAT.body);
 
 type Layer = 'body' | 'glow' | 'win';
 const tmpM = new THREE.Matrix4(), tmpQ = new THREE.Quaternion(), tmpE = new THREE.Euler(), tmpV = new THREE.Vector3(), tmpS = new THREE.Vector3();
@@ -392,7 +406,7 @@ export function heroRig(): Rig {
   root.add(legL, legR, armR, armL);
   return { root, body, legL, legR, armR, armL, tool, cape, lantern, stack, height: 1.85 };
 }
-const ROBES: Record<string, number> = { gatherer: 0x4a4030, miner: 0x4b4a4e, forager: 0x4e3446, hauler: 0x5c4a2a, master: 0x5a2a22, spear: 0x5a2020, sling: 0x2e3a2a };
+const ROBES: Record<string, number> = { visitor0: 0x4a3a52, visitor1: 0x34463f, visitor2: 0x5a4a3a, visitor3: 0x4e2e2c, gatherer: 0x4a4030, miner: 0x4b4a4e, forager: 0x4e3446, hauler: 0x5c4a2a, master: 0x5a2a22, spear: 0x5a2020, sling: 0x2e3a2a };
 export function catRig(kind: string): Rig {
   const robe = ROBES[kind] ?? 0x3a3430, fur = kind === 'master' || kind === 'spear' ? C.fur2 : C.fur;
   const root = new THREE.Group(), body = cached('cat_' + kind, k => {
@@ -401,6 +415,7 @@ export function catRig(kind: string): Rig {
     k.ball(0.15, fur, 0, 0.84, 0.01, 1, 0.95, 1, 1);                                          // head
     k.cone(0.055, 0.14, 4, fur, -0.085, 0.99, 0, 0, 0, 0.25); k.cone(0.055, 0.14, 4, fur, 0.085, 0.99, 0, 0, 0, -0.25);
     k.ball(0.028, 0xd8e070, -0.055, 0.85, 0.125, 1, 0.75, 1, 0, 'glow'); k.ball(0.028, 0xd8e070, 0.055, 0.85, 0.125, 1, 0.75, 1, 0, 'glow');
+    if (kind.startsWith('visitor')) { k.cyl(0.05, 0.16, 0.2, 7, 0x2a2420, 0, 1.06, 0); k.cyl(0.2, 0.2, 0.02, 8, 0x2a2420, 0, 0.97, 0); k.box(0.14, 0.12, 0.08, C.plank, 0.12, 0.5, 0.16); }
     if (kind === 'forager' || kind === 'sling') k.add(new THREE.ConeGeometry(0.17, 0.2, 7, 1, true), robe, 0, 0.94, -0.03); // hood
     if (kind === 'miner') { k.cyl(0.13, 0.15, 0.06, 7, 0x6a5a3a, 0, 0.98, 0); k.ball(0.03, C.fire2, 0, 1.0, 0.13, 1, 1, 1, 0, 'glow'); }
     if (kind === 'spear') k.cyl(0.13, 0.16, 0.1, 7, 0x6a6a6e, 0, 0.98, 0);
@@ -458,7 +473,7 @@ export const ITEM_H: Record<ItemId, number> = { log: 0.17, lav: 0.17, plank: 0.1
 export function itemModel(k0: ItemId | 'coin'): THREE.Group {
   return cached('item_' + k0, k => {
     switch (k0) {
-      case 'log': case 'lav': k.cyl(0.08, 0.08, 0.44, 7, k0 === 'lav' ? C.lav : C.bark, 0, 0.08, 0, 0, 0, Math.PI / 2); k.cyl(0.065, 0.065, 0.45, 7, C.plank, 0, 0.08, 0, 0, 0, Math.PI / 2); break;
+      case 'log': case 'lav': k.cyl(0.085, 0.085, 0.44, 7, k0 === 'lav' ? C.lav2 : 0x7a5638, 0, 0.085, 0, 0, 0, Math.PI / 2); k.cyl(0.07, 0.07, 0.452, 7, 0xd0a874, 0, 0.085, 0, 0, 0, Math.PI / 2); break;
       case 'plank': k.box(0.46, 0.07, 0.16, C.plank, 0, 0.04, 0); break;
       case 'stone': k.rock(0.11, C.stone, 0, 0.09, 0, 1.2, 0.8, 1); break;
       case 'berry': for (let i = 0; i < 5; i++) k.ball(0.055, 0x5a2a62, Math.cos(i * 1.3) * 0.06, 0.05 + (i > 3 ? 0.07 : 0), Math.sin(i * 1.3) * 0.06); break;
@@ -468,6 +483,18 @@ export function itemModel(k0: ItemId | 'coin'): THREE.Group {
       case 'coin': k.cyl(0.1, 0.1, 0.03, 10, C.gold, 0, 0.1, 0, Math.PI / 2, 0, 0); k.cyl(0.06, 0.06, 0.032, 6, 0x8a6a2e, 0, 0.1, 0.002, Math.PI / 2, 0, 0); break;
     }
   });
+}
+
+// ---------------------------------------------------------------- price plots
+let plotTex: THREE.CanvasTexture | null = null;
+export function plotTexture(): THREE.CanvasTexture {
+  if (plotTex) return plotTex;
+  const cv = document.createElement('canvas'); cv.width = cv.height = 256; const c = cv.getContext('2d')!;
+  c.fillStyle = 'rgba(20,16,12,0.45)'; c.fillRect(14, 14, 228, 228);
+  c.strokeStyle = '#e8d8b0'; c.lineWidth = 9; c.setLineDash([26, 18]); c.lineDashOffset = 8; c.strokeRect(16, 16, 224, 224);
+  c.setLineDash([]); c.strokeStyle = '#d9b25a'; c.lineWidth = 12; c.lineCap = 'round';
+  for (const [x, y, dx, dy] of [[30, 30, 1, 1], [226, 30, -1, 1], [30, 226, 1, -1], [226, 226, -1, -1]]) { c.beginPath(); c.moveTo(x, y + dy * 34); c.lineTo(x, y); c.lineTo(x + dx * 34, y); c.stroke(); }
+  plotTex = new THREE.CanvasTexture(cv); plotTex.colorSpace = THREE.SRGBColorSpace; plotTex.anisotropy = 4; return plotTex;
 }
 
 // ---------------------------------------------------------------- pads

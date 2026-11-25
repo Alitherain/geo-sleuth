@@ -174,3 +174,10 @@ textarea { width: 100%; box-sizing: border-box; border-radius: 2px; border: 1px 
 #labels .ehp.lit i { background: #ffb84a; }
 #ghostWhy.ok { color: #b8c08a; }
 #bdesc b { color: var(--parch2); }
+#labels .plot { display: flex; flex-direction: column; align-items: center; background: rgba(20,17,15,.88); border: 1px solid var(--gold); padding: 3px 10px 4px; border-radius: 2px; line-height: 1.1; }
+#labels .plot small { font-size: 11px; color: var(--parch); letter-spacing: .04em; }
+#labels .plot b { display: flex; align-items: center; gap: 5px; font-family: var(--title); font-size: 20px; color: var(--gold2); }
+#labels .plot .coin { width: .8em; height: .8em; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #e0c27a, var(--gold) 50%, #6b5428); border: 1px solid var(--ink); }
+#labels .bub.want { display: flex; align-items: center; gap: 3px; font-size: 14px; padding: 2px 8px 2px 4px; }
+#labels .bub.want img { height: 22px; }
+#labels .bub.want.low { background: #e0a07a; }

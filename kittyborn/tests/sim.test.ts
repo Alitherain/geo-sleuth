@@ -68,6 +68,35 @@ describe('grid', () => {
   });
 });
 
+describe('ad loops', () => {
+  it('a price pad appears, takes coins from the hero and becomes a site', () => {
+    const w = createWorld(); w.stats.earned = 10; w.coins = 50;
+    run(w, 1.2);
+    expect(w.offers).toHaveLength(1);
+    const o = w.offers[0]; expect(o.type).toBe('houseGatherer');
+    w.hero.x = o.x; w.hero.y = o.y + 10;
+    run(w, 3);
+    expect(w.offers.find(x => x.id === o.id)).toBeUndefined();
+    expect(Object.values(w.buildings).some(b => b.type === 'houseGatherer')).toBe(true);
+    expect(w.coins).toBe(50 - 15);
+  });
+  it('customers queue, get served from the bag and pay double into the till', () => {
+    const w = createWorld(); w.stats.earned = 10; w.visitT = 0; w.offers = [];
+    run(w, 0.1);
+    expect(w.visitors).toHaveLength(1);
+    const v = w.visitors[0];
+    run(w, 25);
+    expect(v.state).toBe('wait');
+    const pad = { x: w.buildings.shop.x, y: w.buildings.shop.y + 120 };
+    w.hero.stack = Array(v.n + 2).fill(v.want); w.hero.x = pad.x; w.hero.y = pad.y;
+    const coins = w.coins;
+    for (let i = 0; i < 30 * 6; i++) { step(w, { x: 0, y: 0 }, 1 / 30); w.events.length = 0; }
+    expect(v.state).toBe('leave');
+    expect(w.till).toBe(0);
+    expect(w.coins).toBeGreaterThan(coins + 4);
+  });
+});
+
 describe('logistics', () => {
   it('two haulers never claim the same goods', () => {
     const w = createWorld(); town(w);

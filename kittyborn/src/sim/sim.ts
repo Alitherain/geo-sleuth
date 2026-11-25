@@ -3,6 +3,7 @@ import { collide } from './physics';
 import { harvestNode, updateCats } from './logistics';
 import { addFuel, barracksTick, deliverToSite, production, sell } from './economy';
 import { damageEnemy, updateClock, updateUnits } from './night';
+import { frontVisitor, offerAt, payOffer, serveOne, takeTill, updateOffers, updateVisitors } from './town';
 import { available, dist, heroCap, heroDmg, heroMaxHp, heroSpeed, heroSwing, invAdd, invGet, nodeOpen, procStats, storageFree, type Building, type World } from './world';
 
 export interface Input { x: number; y: number }
@@ -38,6 +39,8 @@ export function step(w: World, input: Input, dt: number) {
   updateCats(w, dt);
   updateUnits(w, dt);
   updateClock(w, dt);
+  updateOffers(w, dt);
+  updateVisitors(w, dt);
   for (const g of w.ground) { g.age += dt; if (g.z > 0 || g.vz > 0) { g.vz -= 500 * dt; g.z += g.vz * dt; if (g.z < 0) { g.z = 0; g.vz = Math.abs(g.vz) > 60 ? -g.vz * 0.35 : 0; } } }
   if (w.ground.length > 160) w.ground.splice(0, w.ground.length - 160);
 }
@@ -82,6 +85,9 @@ function heroUpdate(w: World, input: Input, dt: number) {
   }
   transferT -= dt;
   if (transferT > 0) return;
+  const slow = Math.hypot(h.vx, h.vy) <= 70;
+  const off = offerAt(w, h.x, h.y);
+  if (off) { if (!slow) { h.padT = 0; return; } h.padT = (h.padT || 0) + dt; if (h.padT >= 0.25 && payOffer(w, off)) transferT = 0.05; return; }
   const s = heroSlot(w); if (!s) { h.padT = 0; return; }
   // pads act only once the hero stops on them, so running past the owl never sells the bag by accident
   if (s.slot !== 'site') { if (Math.hypot(h.vx, h.vy) > 70) { h.padT = 0; return; } h.padT = (h.padT || 0) + dt; if (h.padT < 0.25) return; }
@@ -89,7 +95,15 @@ function heroUpdate(w: World, input: Input, dt: number) {
   const toward = (item: ItemId, x: number, y: number) => w.events.push({ t: 'fly', item, fx: h.x, fy: h.y, fz: 40, to: { x, y } });
   const takeOf = (k: ItemId) => { const i = h.stack.lastIndexOf(k); if (i < 0) return false; h.stack.splice(i, 1); return true; };
   switch (s.slot) {
-    case 'sell': if (top) { h.stack.pop(); toward(top, b.x, b.y); sell(w, top, 1, b.x + (Math.random() - 0.5) * 50, b.y - 60); transferT = 0.06; } break;
+    case 'sell': {
+      const v = frontVisitor(w);
+      if (v && takeOf(v.want)) { serveOne(w, v); transferT = 0.08; break; }   // customers first
+      if (w.till > 0) { takeTill(w); transferT = 0.05; break; }              // then the till on the counter
+      const keep = new Set(w.visitors.filter(x => x.state !== 'leave').map(x => x.want));
+      const i = h.stack.map((k, j) => [k, j] as const).reverse().find(([k]) => !keep.has(k))?.[1];
+      if (i !== undefined) { const k = h.stack.splice(i, 1)[0]; toward(k, b.x, b.y); sell(w, k, 1, b.x + (Math.random() - 0.5) * 50, b.y - 60); transferT = 0.06; }
+      break;
+    }
     case 'deposit': if (top && storageFree(b) > 0) { h.stack.pop(); toward(top, b.x, b.y); invAdd(b.store, top, 1); w.events.push({ t: 'drop', x: b.x, y: b.y }); transferT = 0.05; } break;
     case 'in': { const p = procStats(b); if (invGet(b.input, p.input) + invGet(b.incoming, p.input) < p.inCap && takeOf(p.input)) { toward(p.input, b.x, b.y); invAdd(b.input, p.input, 1); w.events.push({ t: 'drop', x: b.x, y: b.y }); transferT = 0.06; } break; }
     case 'out': { const p = procStats(b); if (h.stack.length < cap && available(b, p.output) > 0) { invAdd(b.store, p.output, -1); h.stack.push(p.output); w.events.push({ t: 'fly', item: p.output, fx: b.x, fy: b.y, fz: 10, to: 'hero' }); w.events.push({ t: 'pick', x: h.x, y: h.y }); transferT = 0.07; } break; }

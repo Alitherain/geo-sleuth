@@ -5,7 +5,7 @@ export const SCHEMA = 3;
 export interface SaveEnvelope { schemaVersion: number; game: 'dark-kittyborn'; savedAt: number; world: any }
 
 export function serialize(w: World): SaveEnvelope {
-  const { events, nodes, ...rest } = w;
+  const { events, nodes, visitors, ...rest } = w;
   return {
     schemaVersion: SCHEMA, game: 'dark-kittyborn', savedAt: Date.now(),
     world: {
@@ -27,7 +27,7 @@ export function deserialize(env: SaveEnvelope): World {
   let data = env.world;
   for (let v = env.schemaVersion; v < SCHEMA; v++) data = MIGRATIONS[v]?.(data) ?? data;
   const w = createWorld();
-  for (const k of ['time', 'coins', 'nextId', 'up', 'flags', 'stats', 'ground', 'units'] as const) if (data[k] !== undefined) (w as any)[k] = data[k];
+  for (const k of ['time', 'coins', 'nextId', 'up', 'flags', 'stats', 'ground', 'units', 'offers', 'till'] as const) if (data[k] !== undefined) (w as any)[k] = data[k];
   if (data.hero) Object.assign(w.hero, data.hero, { dead: 0 });
   if (data.clock) Object.assign(w.clock, data.clock);
   if (data.buildings) w.buildings = Object.fromEntries(Object.entries<any>(data.buildings).map(([id, b]) => [id, { ...b, reserved: {}, incoming: {} }]));

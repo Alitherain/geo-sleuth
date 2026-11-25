@@ -40,7 +40,7 @@ export function production(w: World, dt: number) {
       if (invGet(b.input, p.input) < 1) { b.status = `Чекаю: ${ITEMS[p.input].name.toLowerCase()}`; b.t = 0; continue; }
       if (invGet(b.store, p.output) >= p.outCap) { b.status = 'Вихід повний'; b.t = 0; continue; }
       b.status = 'Працює'; b.t += dt;
-      if (b.t >= p.time) { b.t = 0; invAdd(b.input, p.input, -1); b.frac += p.yield; const made = Math.floor(b.frac); b.frac -= made; invAdd(b.store, p.output, made); }
+      if (b.t >= p.time) { b.t = 0; invAdd(b.input, p.input, -1); b.frac += p.yield; const made = Math.floor(b.frac); b.frac -= made; invAdd(b.store, p.output, made); if (made) w.events.push({ t: 'made', x: b.x, y: b.y, kind: p.output }); }
     }
     if (def.fuel && b.fuel > 0) {
       const night = w.clock.phase === 'night' ? 2 : 1;

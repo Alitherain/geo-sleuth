@@ -41,11 +41,16 @@ export interface Enemy {
   passive: boolean; aggro: number; wx: number; wy: number; wt: number; lit: boolean;
   boss?: { state: 'drop' | 'walk' | 'tele' | 'jump'; t: number; tx: number; ty: number; sx: number; sy: number; slams: number };
 }
+export interface Offer { id: number; type: BuildingType; x: number; y: number; paid: number }
+export interface Visitor {
+  id: number; x: number; y: number; face: number; walkT: number; moving: boolean; look: number;
+  want: ItemId; n: number; total: number; state: 'come' | 'wait' | 'leave'; patience: number; maxPatience: number; got: number;
+}
 export interface Ground { id: number; type: ItemId; x: number; y: number; z: number; vz: number; age: number }
 export interface Shot { id: number; x: number; y: number; target: number; dmg: number; kind: 'cone' | 'pebble' }
 export type GameEvent =
   | { t: 'fly'; item: ItemId | 'coin'; fx: number; fy: number; fz: number; to: 'hero' | number | P }
-  | { t: 'chop' | 'fell' | 'hit' | 'poof' | 'build' | 'hurt' | 'slam' | 'coin' | 'pick' | 'drop' | 'pay' | 'upgrade' | 'shot' | 'wallHit' | 'lightOut' | 'placed' | 'mine'; x: number; y: number; v?: number; kind?: string }
+  | { t: 'chop' | 'fell' | 'hit' | 'poof' | 'build' | 'hurt' | 'slam' | 'coin' | 'pick' | 'drop' | 'pay' | 'upgrade' | 'shot' | 'wallHit' | 'lightOut' | 'placed' | 'mine' | 'made' | 'served' | 'unlock'; x: number; y: number; v?: number; kind?: string }
   | { t: 'text'; x: number; y: number; s: string; color?: string; size?: number }
   | { t: 'bubble'; who: 'owl' | number; s: string }
   | { t: 'toast'; title: string; body: string }
@@ -59,6 +64,7 @@ export interface World {
   version: number; time: number; coins: number; nextId: number;
   hero: Hero; nodes: ResNode[]; buildings: Record<string, Building>;
   cats: Cat[]; units: Unit[]; enemies: Enemy[]; ground: Ground[]; shots: Shot[];
+  offers: Offer[]; visitors: Visitor[]; till: number; visitT: number;
   up: { bag: number; axe: number; boots: number; heart: number; mint: number };
   clock: Clock; flags: Record<string, boolean>;
   stats: { earned: number; felled: number; hunted: number; nights: number; bosses: number };
@@ -66,7 +72,7 @@ export interface World {
 }
 
 // ---------------------------------------------------------------- derived stats
-export const heroCap = (w: World) => 12 + w.up.bag * 6;
+export const heroCap = (w: World) => 20 + w.up.bag * 8;
 export const heroSpeed = (w: World) => 190 * (1 + w.up.boots * 0.12);
 export const heroDmg = (w: World) => 1 + w.up.axe * 0.6;
 export const heroSwing = (w: World) => 0.4 * Math.pow(0.92, w.up.axe);
@@ -137,7 +143,7 @@ export function createWorld(): World {
   const w: World = {
     version: 3, time: 0, coins: 10, nextId: 1,
     hero: { x: TC.x, y: TC.y + 4 * CELL, vx: 0, vy: 0, face: 1, walkT: 0, moving: false, stack: [], hp: 5, inv: 0, hurtT: 0, regenT: 0, dead: 0, swingT: 0, swing: 0, form: 'axe' },
-    nodes: [], buildings: {}, cats: [], units: [], enemies: [], ground: [], shots: [],
+    nodes: [], buildings: {}, cats: [], units: [], enemies: [], ground: [], shots: [], offers: [], visitors: [], till: 0, visitT: 40,
     up: { bag: 0, axe: 0, boots: 0, heart: 0, mint: 0 },
     clock: { phase: 'day', t: 0, day: 1, n: 0, queue: [], reward: 0, title: '', dirs: [], dark: 0, early: false },
     flags: {}, stats: { earned: 0, felled: 0, hunted: 0, nights: 0, bosses: 0 }, events: [],
