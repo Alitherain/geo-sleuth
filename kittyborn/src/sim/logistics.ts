@@ -2,9 +2,9 @@
 // Buildings expose needs (production input, construction sites, fuel) and sources (production output, storage).
 // An idle hauler scores every possible trip and claims the best one. Claims reserve the amount at both ends,
 // so two cats never chase the same goods and a cat finishes the trip it started.
-import { BUILD, ITEMS, type GatherKind, type ItemId } from '../content/data';
+import { BUILD, ITEMS, TC, type GatherKind, type ItemId } from '../content/data';
 import { collide, walkTo } from './physics';
-import { heroCap, allOf, available, catBoost, catCap, catSpeed, dist, invAdd, invGet, nodeOpen, procStats, storageFree, type Building, type Cat, type P, type ResNode, type World } from './world';
+import { heroCap, allOf, available, catBoost, invTotal, levelStats, catCap, catSpeed, dist, invAdd, invGet, nodeOpen, procStats, storageFree, type Building, type Cat, type P, type ResNode, type World } from './world';
 import { addFuel, deliverToSite, sell } from './economy';
 
 // ---------------------------------------------------------------- endpoints: "<buildingId>|<part>"
@@ -15,7 +15,7 @@ export function endpointPos(w: World, s: string): P | null {
   const [b, part] = parse(w, s); if (!b) return null;
   if (part === 'site') return { x: b.x, y: b.y + BUILD[b.type].r + 10 };
   const want = part === 'store' ? 'deposit' : part;
-  const slot = (BUILD[b.type].slots || []).find(x => x.kind === want);
+  const slot = (BUILD[b.type].slots || []).find(x => x.kind === want) || (want === 'deposit' ? (BUILD[b.type].slots || []).find(x => x.kind === 'in') : undefined);
   return slot ? { x: b.x + slot.dx, y: b.y + slot.dy } : { x: b.x, y: b.y + BUILD[b.type].r + 10 };
 }
 function reserveSource(w: World, s: string, k: ItemId, n: number) { const [b] = parse(w, s); if (b) invAdd(b.reserved, k, n); }
@@ -85,6 +85,17 @@ export function listTrips(w: World, cap: number): Trip[] {
       }
       const want = p.inCap - invGet(b.input, p.input) - invGet(b.incoming, p.input), src = sourceFor(w, p.input, b);
       if (src && want >= Math.min(cap, 4)) trips.push({ from: ep(src, 'store'), to: ep(b, 'in'), item: p.input, n: Math.min(cap, want, available(src, p.input)), prio: invGet(b.input, p.input) === 0 ? 3 : 2, why: `Підвезти: ${ITEMS[p.input].name.toLowerCase()}` });
+    }
+  }
+  // shop shelves: keep a little of everything, more of what the queue asks for
+  for (const sh of allOf(w, 'store')) {
+    const scap = levelStats(sh).cap || 40, room = scap - invTotal(sh.store) - invTotal(sh.incoming);
+    if (room <= 0) continue;
+    for (const k of ['log', 'plank', 'berry', 'stone', 'candle', 'lav'] as ItemId[]) {
+      const asked = w.visitors.filter(v => v.state !== 'leave' && v.want === k).reduce((q, v) => q + v.n, 0);
+      const need = Math.min(room, Math.max(asked, Math.floor(scap / 5)) - invGet(sh.store, k) - invGet(sh.incoming, k));
+      const src = sourceFor(w, k, sh), spare = src ? available(src, k) - Math.floor((RESERVE[k] || 0) / 2) : 0;
+      if (src && need >= Math.min(scap / 10, 3) && spare > 0) trips.push({ from: ep(src, 'store'), to: ep(sh, 'store'), item: k, n: Math.min(cap, need, spare), prio: asked ? 3 : 2, why: `На полиці: ${ITEMS[k].name.toLowerCase()}` });
     }
   }
   if (w.buildings.shop) for (const st of allOf(w, 'storage')) for (const k of Object.keys(ITEMS) as ItemId[]) {
@@ -180,7 +191,7 @@ function hauler(w: World, c: Cat, dt: number) {
   }
   if (best) { reserveSource(w, best.from, best.item, best.n); reserveTarget(w, best.to, best.item, best.n); c.task = { kind: 'haul', item: best.item, from: best.from, to: best.to, n: best.n, stage: 'toSource' }; c.idle = ''; return; }
   // pick up loot on the ground near town
-  const g = w.ground.filter(x => x.age > 1 && dist(x.x, x.y, 1500, 1000) < 900).sort((a, b) => dist(c.x, c.y, a.x, a.y) - dist(c.x, c.y, b.x, b.y))[0];
+  const g = w.ground.filter(x => x.age > 1 && dist(x.x, x.y, TC.x, TC.y) < 900).sort((a, b) => dist(c.x, c.y, a.x, a.y) - dist(c.x, c.y, b.x, b.y))[0];
   if (g) {
     if (walkTo(w, c, g.x, g.y, catSpeed(w), dt, 10)) {
       for (let i = w.ground.length - 1; i >= 0 && c.stack.length < cap; i--) { const q = w.ground[i]; if (dist(q.x, q.y, c.x, c.y) < 50) { c.stack.push(q.type); w.ground.splice(i, 1); w.events.push({ t: 'fly', item: q.type, fx: q.x, fy: q.y, fz: 0, to: c.id }); } }

@@ -286,6 +286,21 @@ export function buildingModel(type: BuildingType | 'site', level = 1, fp = 1, ma
       });
       break;
     }
+    case 'store': {
+      group = cached('store', k => {
+        house(k, 2.0, 1.5, 1.6, 1.3, { wall: C.plaster, roof: C.roofRed, timber: true, base: C.darkStone, win: 1, chimney: C.darkStone, x: -0.25, z: -0.45 });
+        // counter under a striped awning, shelves with goods
+        k.box(2.3, 0.7, 0.45, C.wood, 0, 0.35, 0.65); k.box(2.4, 0.07, 0.55, C.plank, 0, 0.72, 0.65);
+        for (let i = 0; i < 8; i++) k.box(0.3, 0.05, 0.85, i % 2 ? C.parch : C.cin, -1.05 + i * 0.3, 1.5, 0.55, 0.38, 0, 0);
+        for (const x of [-1.15, 1.15]) k.box(0.09, 1.5, 0.09, C.timber, x, 0.75, 0.95);
+        k.box(1.4, 0.6, 0.06, C.wood2, -0.3, 1.0, 0.33); for (let r = 0; r < 2; r++) k.box(1.4, 0.04, 0.16, C.plank, -0.3, 0.86 + r * 0.26, 0.38);
+        for (let i = 0; i < 4; i++) { k.cyl(0.05, 0.05, 0.26, 6, C.bark, -0.8 + i * 0.16, 0.95, 0.4, 0, 0, Math.PI / 2); k.ball(0.05, 0x5a2a62, -0.8 + i * 0.18, 1.2, 0.42); }
+        k.cyl(0.03, 0.03, 0.14, 6, C.parch, 0.25, 1.2, 0.4); k.ball(0.025, C.fire2, 0.25, 1.3, 0.4, 1, 1.5, 1, 0, 'glow');
+        k.box(0.04, 0.6, 0.04, C.iron, 1.25, 1.75, 0.95); k.box(0.4, 0.04, 0.04, C.iron, 1.1, 2.0, 0.95); k.box(0.34, 0.3, 0.04, C.gold, 1.05, 1.8, 0.95);
+        k.cyl(0.18, 0.18, 0.42, 8, C.wood2, 1.2, 0.21, -0.6); k.box(0.36, 0.36, 0.36, C.wood, 1.2, 0.18, -0.15);
+      });
+      break;
+    }
     case 'barracks': {
       group = cached('barracks', k => {
         house(k, 2.5, 1.6, 1.15, 1.2, { wall: C.stone, roof: C.cin, base: C.darkStone, win: 2, chimney: C.darkStone, z: -0.25 });
@@ -514,10 +529,11 @@ export function padTexture(kind: string): THREE.CanvasTexture {
     case 'out': c.moveTo(cx, cy + 18); c.lineTo(cx, cy - 18); c.moveTo(cx - 13, cy - 5); c.lineTo(cx, cy - 18); c.lineTo(cx + 13, cy - 5); break;
     case 'forge': c.moveTo(cx - 16, cy + 18); c.lineTo(cx + 6, cy - 4); c.moveTo(cx - 4, cy - 18); c.lineTo(cx + 18, cy + 4); break;
     case 'bell': c.moveTo(cx - 16, cy + 12); c.quadraticCurveTo(cx - 14, cy - 20, cx, cy - 20); c.quadraticCurveTo(cx + 14, cy - 20, cx + 16, cy + 12); c.closePath(); c.moveTo(cx - 4, cy + 18); c.lineTo(cx + 4, cy + 18); break;
+    case 'till': c.rect(cx - 20, cy - 8, 40, 22); c.moveTo(cx - 12, cy - 8); c.lineTo(cx - 12, cy - 18); c.lineTo(cx + 12, cy - 18); c.lineTo(cx + 12, cy - 8); c.moveTo(cx - 6, cy + 3); c.lineTo(cx + 6, cy + 3); break;
     case 'fuel': c.moveTo(cx, cy - 22); c.quadraticCurveTo(cx + 20, cy, cx + 12, cy + 14); c.quadraticCurveTo(cx, cy + 22, cx - 12, cy + 14); c.quadraticCurveTo(cx - 20, cy, cx, cy - 22); break;
   }
   c.stroke();
-  const label: Record<string, string> = { sell: 'ПРОДАТИ', deposit: 'НА СКЛАД', in: 'ПРИЙОМ', out: 'ВИДАЧА', forge: 'КУЗНЯ', bell: 'ДЗВІН', fuel: 'ПАЛИВО' };
+  const label: Record<string, string> = { sell: 'ПРОДАТИ', deposit: 'НА СКЛАД', in: 'ПРИЙОМ', out: 'ВИДАЧА', forge: 'КУЗНЯ', bell: 'ДЗВІН', fuel: 'ПАЛИВО', till: 'КАСА' };
   c.font = '700 17px "PT Serif", Georgia, serif'; c.textAlign = 'center'; c.fillStyle = '#c9bfa8'; c.fillText(label[kind] || '', 64, 108);
   t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; padTex.set(kind, t); return t;
 }

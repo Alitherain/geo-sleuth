@@ -3,7 +3,8 @@
 import * as THREE from 'three';
 import { BUILD, CELL, EDGE, GROVE, HEDGE_X, HILLS, ITEMS, MEADOW, ROAD_Y, SPAWNS, TC, W, H, WILDS, type BuildingType, type ItemId } from '../content/data';
 import { dist, hallLevel, invTotal, lightRadius, type Building, type GameEvent, type World } from '../sim/world';
-import { areaHalf, footprint, occupancy, padRow, townHalf } from '../sim/grid';
+import { townHalf } from '../sim/grid';
+import { SOCKET_OF, fits, plotTaken, plotsNow, socketTaken, sockets, spotsFor, type District } from '../sim/plan';
 import { C, ITEM_H, MAT, addGrain, buildingModel, catRig, enemyModel, heroRig, itemModel, nodeModel, padTexture, plotTexture, propGeo, toolModel, type Rig } from './models';
 import { offerCost } from '../sim/town';
 import { sfx } from '../platform/audio';
@@ -13,8 +14,8 @@ const REDUCED = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduce
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const angLerp = (a: number, b: number, t: number) => { let d = b - a; while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2; return a + d * t; };
 
-export interface Ghost { type: BuildingType; x: number; y: number; ok: boolean; moving?: string; line?: { x: number; y: number; ok: boolean }[] }
-export interface BuildView { active: boolean; ghost: Ghost | null; selected: string | null; why?: string; spots?: { x: number; y: number }[] }
+/** What build mode wants drawn: a chosen building type (pick), a tapped empty plot or socket (spot), a building being moved. */
+export interface BuildView { active: boolean; pick: BuildingType | null; spot: string | null; moving: string | null; selected: string | null }
 
 // ---------------------------------------------------------------- particles (three pooled point clouds)
 class Particles {
@@ -462,59 +463,48 @@ export class View {
     }
     for (const [id, v] of this.visitors) if (!vs.has(id)) { this.scene.remove(v.rig.root); this.bubble(v, null); this.visitors.delete(id); }
     // coins on the counter
-    const shop = w.buildings.shop, n = shop ? Math.min(36, Math.ceil(w.till / 3)) : 0;
+    const shop = Object.values(w.buildings).find(b => b.type === 'store' && !b.site), n = shop ? Math.min(36, Math.ceil((shop.till || 0) / 3)) : 0;
     if (n !== this.tillN) { this.tillN = n; this.till.clear(); for (let i = 0; i < n; i++) { const m = itemModel('coin'); m.rotation.x = -Math.PI / 2; m.position.set((Math.floor(i / 12) - 1) * 0.24, 0.82 + (i % 12) * 0.035, 0); this.till.add(m); } }
-    if (shop) this.till.position.set(shop.x * U + 0.55, 0, shop.y * U + 0.45);
+    if (shop) this.till.position.set(shop.x * U + 0.9, 0, shop.y * U + 1.1);
   }
 
   // ---------------------------------------------------------------- build mode
   updateBuild() {
     const st = this.getBuild(), w = this.w;
     this.gridMesh.visible = this.ringMesh.visible = this.selLine.visible = this.borderLine.visible = this.nearLine.visible = false;
-    if (!st.active) { this.ghostGroup.visible = false; return; }
-    const T = townHalf(w), A = areaHalf(w);
+    this.ghostGroup.visible = false;
+    if (!st.active) return;
+    const T = townHalf(w);
     this.borderLine.visible = true; this.borderLine.position.set(TC.x * U, 0.05, TC.y * U); this.borderLine.scale.set(T * 2, 1, T * 2);
-    this.nearLine.visible = true; this.nearLine.position.set(TC.x * U, 0.05, TC.y * U); this.nearLine.scale.set(A * 2, 1, A * 2);
+    this.nearLine.visible = true; this.nearLine.position.set(TC.x * U, 0.05, TC.y * U); this.nearLine.scale.set(T * 2 + 2, 1, T * 2 + 2);
     if (st.selected && w.buildings[st.selected]) { const b = w.buildings[st.selected], f = BUILD[b.type].fp || 1; this.selLine.visible = true; this.selLine.position.set(b.x * U, 0.07, b.y * U); this.selLine.scale.set(f + 0.15, 1, f + 0.15); }
-    const g = st.ghost;
-    // cell highlight: red = taken, amber = keep free (pads, roads), green = where the chosen building fits
-    const sig = JSON.stringify([g?.type, g?.moving, st.spots?.length, Object.keys(w.buildings).length, T]);
+    // free plots tinted by district; the ones that fit the chosen building glow green, the tapped one gold
+    const want = st.pick ?? (st.moving ? w.buildings[st.moving]?.type ?? null : null);
+    const sig = JSON.stringify([want, st.spot, st.moving, Object.keys(w.buildings).length, hallLevel(w), Math.floor(this.elapsed * 2) % 2]);
     this.gridMesh.visible = true;
     if (sig !== this.gridSig) {
       this.gridSig = sig;
-      const occ = occupancy(w, g?.moving), o = new THREE.Object3D(), col = new THREE.Color(); let n = 0;
-      const fits = new Set<string>();
-      if (g && st.spots) for (const s of st.spots) for (const [i, j] of footprint(g.type, s.x, s.y)) fits.add(i + ',' + j);
-      const lim = g && BUILD[g.type].zone === 'near' ? A : T;
-      for (let i = -lim; i < lim; i++) for (let j = -lim; j < lim; j++) {
-        const u = occ.get(i * 4096 + j), road = i === -1 || i === 0 || j === -1 || j === 0;
-        let c = -1;
-        if (u?.kind === 'fp') c = u.walk ? 0x8a6a3a : 0x9a2a22; else if (u?.kind === 'pad') c = 0xd9a03a; else if (fits.has(i + ',' + j)) c = 0x7aa05a; else if (road) c = 0x3a3020;
-        if (c < 0) continue;
-        o.position.set(TC.x * U + i + 0.5, 0, TC.y * U + j + 0.5); o.updateMatrix(); this.gridMesh.setMatrixAt(n, o.matrix); this.gridMesh.setColorAt(n, col.set(c)); n++;
+      const o = new THREE.Object3D(), col = new THREE.Color(); let n = 0;
+      const DC: Record<District, number> = { plaza: 0x8a8270, craft: 0xb07a3a, slob: 0x6f8a52, market: 0xc9a35a, guard: 0x6a7a96 };
+      const blink = Math.floor(this.elapsed * 2) % 2 === 0;
+      for (const p of plotsNow(w)) {
+        if (plotTaken(w, p, st.moving ?? undefined)) continue;
+        const ok = want ? fits(want, p) : true, chosen = st.spot === p.id;
+        const c = chosen ? 0xffd27a : want ? (ok ? (blink ? 0x9ad070 : 0x7aa05a) : 0x2a2622) : DC[p.district];
+        o.position.set(TC.x * U + p.x + p.size / 2, 0, TC.y * U + p.y + p.size / 2); o.scale.set(p.size - 0.12, 1, p.size - 0.12); o.updateMatrix();
+        this.gridMesh.setMatrixAt(n, o.matrix); this.gridMesh.setColorAt(n, col.set(c)); n++;
+      }
+      for (const sk of sockets(w)) {
+        if (socketTaken(w, sk, st.moving ?? undefined)) continue;
+        const f = sk.kind === 'tower' ? 2 : 1, ok = want ? !!SOCKET_OF[want]?.includes(sk.kind) : true, chosen = st.spot === 'socket:' + sk.id;
+        const c = chosen ? 0xffd27a : want ? (ok ? (blink ? 0xffb050 : 0xd08030) : 0x2a2622) : sk.kind === 'tower' ? 0x9a9a9e : 0xe0a050;
+        o.position.set(TC.x * U + sk.x + f / 2, 0, TC.y * U + sk.y + f / 2); o.scale.set(f - 0.16, 1, f - 0.16); o.updateMatrix();
+        this.gridMesh.setMatrixAt(n, o.matrix); this.gridMesh.setColorAt(n, col.set(c)); n++;
       }
       this.gridMesh.count = n; this.gridMesh.instanceMatrix.needsUpdate = true; if (this.gridMesh.instanceColor) this.gridMesh.instanceColor.needsUpdate = true;
     }
-    if (!g) { this.ghostGroup.visible = false; return; }
-    this.ghostGroup.visible = true;
-    const pts = g.line && g.line.length ? g.line : [{ x: g.x, y: g.y, ok: g.ok }];
-    const gsig = g.type + '|' + (g.moving || '') + '|' + pts.map(p => p.x + ',' + p.y + (p.ok ? 1 : 0)).join(';');
-    if (gsig !== this.ghostSig) {
-      this.ghostSig = gsig; this.ghostGroup.clear();
-      const src = g.moving ? w.buildings[g.moving] : null;
-      for (const p of pts) {
-        const m = buildingModel(g.type, src?.level || 1, BUILD[g.type].fp, g.type === 'palisade' && pts.length > 1 ? 0 : 0).group;
-        m.traverse(o => { const mesh = o as THREE.Mesh; if (mesh.isMesh) { mesh.material = p.ok ? this.ghostOk : this.ghostBad; mesh.castShadow = false; } });
-        m.position.set(p.x * U, 0.02, p.y * U); this.ghostGroup.add(m);
-        const f = BUILD[g.type].fp || 1;
-        const sq = new THREE.Mesh(new THREE.PlaneGeometry(f, f).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: p.ok ? 0x7aa05a : 0xc0432f, transparent: true, opacity: 0.45, depthWrite: false }));
-        sq.position.set(p.x * U, 0.06, p.y * U); this.ghostGroup.add(sq);
-        for (const [i, j] of padRow(g.type, p.x, p.y)) { const pm = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.9).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xd9a03a, transparent: true, opacity: 0.4, depthWrite: false })); pm.position.set(TC.x * U + i + 0.5, 0.06, TC.y * U + j + 0.5); this.ghostGroup.add(pm); }
-      }
-    }
-    this.ghostGroup.children.forEach((c, i) => { if (i % 2 === 0 && c.type === 'Group') c.position.y = 0.02 + Math.sin(this.elapsed * 4) * 0.03; });
-    const def = BUILD[g.type], rad = def.fuel ? def.fuel.radius : g.type === 'tower' ? 190 : 0;
-    if (rad) { this.ringMesh.visible = true; this.ringMesh.position.set(g.x * U, 0.04, g.y * U); this.ringMesh.scale.setScalar(rad * U); }
+    // light radius preview for the chosen light
+    if (want && BUILD[want].fuel) { const sp = spotsFor(w, want)[0]; if (sp) { this.ringMesh.visible = true; this.ringMesh.position.set(sp.x * U, 0.04, sp.y * U); this.ringMesh.scale.setScalar(BUILD[want].fuel!.radius * U); } }
   }
 
   // ---------------------------------------------------------------- events -> effects and sound

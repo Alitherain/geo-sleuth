@@ -1,5 +1,6 @@
 import { BUILD, DAY_LEN, DUSK_LEN, ENEMIES, FIRST_DAY_MAX, SPAWNS, TC, UNITS, waveFor, type EnemyKind, type ItemId } from '../content/data';
 import { collide, moveToward, walkTo } from './physics';
+import { routes } from './plan';
 import { releaseTask } from './logistics';
 import { allOf, clamp, dist, has, inRect, lightRadius, WILDS, type Building, type Enemy, type Unit, type World } from './world';
 
@@ -198,8 +199,8 @@ function towers(w: World, dt: number) {
 let assignT = 0;
 export function updateUnits(w: World, dt: number) {
   assignT -= dt;
-  if (assignT <= 0) { assignT = 1; assignPosts(w); }
-  const night = w.clock.phase === 'night';
+  if (assignT <= 0) { assignT = 1; assignRoutes(w); }
+  const night = w.clock.phase === 'night', R = routes(w);
   for (const u of w.units) {
     const def = UNITS[u.kind];
     u.swingT -= dt; if (u.swing > 0) u.swing = Math.max(0, u.swing - dt * 4.5);
@@ -212,10 +213,11 @@ export function updateUnits(w: World, dt: number) {
       collide(w, u, 10); continue;
     }
     if (!night && u.hp < u.maxHp) u.hp = Math.min(u.maxHp, u.hp + dt * 2);
-    const post = u.post ? w.buildings[u.post] : null;
-    const anchor = post ? { x: post.x, y: post.y } : night ? { x: TC.x, y: TC.y + 140 } : home ? { x: home.x, y: home.y + 60 } : { x: TC.x, y: TC.y };
+    // at night every warrior walks a patrol route (around the wall or along a road) and chases what comes close
+    const route = night && u.post ? R[u.post as keyof typeof R] : null;
+    const anchor = route ? { x: u.x, y: u.y } : home ? { x: home.x, y: home.y + 60 } : { x: TC.x, y: TC.y };
     let tgt: Enemy | undefined, bd = 1e9;
-    for (const e of w.enemies) { if (e.passive || e.z > 20) continue; const d = dist(anchor.x, anchor.y, e.x, e.y); if (d < 210 && d < bd) { bd = d; tgt = e; } }
+    for (const e of w.enemies) { if (e.passive || e.z > 20) continue; const d = dist(anchor.x, anchor.y, e.x, e.y); if (d < (route ? 190 : 120) && d < bd) { bd = d; tgt = e; } }
     if (tgt) {
       const d = dist(u.x, u.y, tgt.x, tgt.y);
       if (d > def.range + tgt.r) walkTo(w, u, tgt.x, tgt.y, def.speed, dt, 4);
@@ -227,26 +229,29 @@ export function updateUnits(w: World, dt: number) {
           else damageEnemy(w, tgt, def.dmg, u.x, u.y);
         }
       }
+    } else if (route) {
+      const mates = w.units.filter(x => x.post === u.post), idx = mates.indexOf(u);
+      if (u.wp === undefined) u.wp = Math.floor(idx * route.length / Math.max(1, mates.length)) % route.length;
+      const p = route[u.wp % route.length];
+      if (walkTo(w, u, p.x, p.y, def.speed * 0.75, dt, 14)) u.wp = (u.wp + 1) % route.length;
     } else {
-      const idx = w.units.filter(x => x.post === u.post).indexOf(u), a = idx * 2.1;
-      walkTo(w, u, anchor.x + Math.cos(a) * 34, anchor.y + 20 + Math.sin(a) * 18, def.speed * 0.8, dt, 6);
+      const idx = w.units.indexOf(u), a = idx * 2.1;
+      walkTo(w, u, anchor.x + Math.cos(a) * 40, anchor.y + 20 + Math.sin(a) * 22, def.speed * 0.6, dt, 6);
     }
     collide(w, u, 10);
   }
   // sling pebbles reuse the shot list; towers() moves them during the night, so move them here by day too
   if (!night) for (let i = w.shots.length - 1; i >= 0; i--) { const s = w.shots[i], e = w.enemies.find(x => x.id === s.target); if (!e) { w.shots.splice(i, 1); continue; } const dx = e.x - s.x, dy = e.y - e.r - s.y, d = Math.hypot(dx, dy), st = 460 * dt; if (d <= st) { w.shots.splice(i, 1); damageEnemy(w, e, s.dmg, s.x, s.y); } else { s.x += dx / d * st; s.y += dy / d * st; } }
 }
-function assignPosts(w: World) {
-  const posts = allOf(w, 'post');
-  for (const u of w.units) if (u.post && !w.buildings[u.post]) u.post = null;
-  for (const p of posts) for (const k of ['spear', 'sling'] as const) {
-    const want = p.want?.[k] || 0;
-    const mine = w.units.filter(u => u.post === p.id && u.kind === k);
-    for (let i = want; i < mine.length; i++) mine[i].post = null;
-    for (let i = mine.length; i < want; i++) {
-      const free = w.units.filter(u => !u.post && u.kind === k).sort((a, b) => dist(a.x, a.y, p.x, p.y) - dist(b.x, b.y, p.x, p.y))[0];
-      if (!free) break; free.post = p.id;
-    }
+/** Split warriors over the routes the barracks ask for. */
+function assignRoutes(w: World) {
+  const want = { ring: 0, ns: 0, ew: 0 };
+  for (const b of allOf(w, 'barracks')) { const r = b.routes || { ring: 2, ns: 1, ew: 1 }; want.ring += r.ring; want.ns += r.ns; want.ew += r.ew; }
+  for (const u of w.units) if (u.post && !(u.post in want)) u.post = null;
+  for (const k of ['ring', 'ns', 'ew'] as const) {
+    const mine = w.units.filter(u => u.post === k);
+    for (let i = want[k]; i < mine.length; i++) { mine[i].post = null; mine[i].wp = undefined; }
+    for (let i = mine.length; i < want[k]; i++) { const free = w.units.find(u => !u.post); if (!free) break; free.post = k; free.wp = undefined; }
   }
 }
 export function hurtUnit(w: World, u: Unit, n: number) {

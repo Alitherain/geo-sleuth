@@ -1,11 +1,12 @@
-import { BUILD, CATEGORIES, HERO_UPG, ITEMS, PROJECTS, SPAWNS, UNITS, type BuildingType, type Category, type Cost, type ItemId } from '../content/data';
+import { BUILD, CATEGORIES, CELL, HERO_UPG, ITEMS, PROJECTS, SPAWNS, TC, UNITS, type BuildingType, type Category, type Cost, type ItemId } from '../content/data';
 import { buildLock, canAfford, chooseSpec, demolish, doProject, heroUpgrade, moveBuilding, nextLevel, place, placeCheck, trainUnit, unitCap, upgradeBuilding } from '../sim/economy';
 import { callNightEarly, litLights, nextWave, secondsToDusk } from '../sim/night';
 import { nearBuilding, type Input } from '../sim/sim';
 import { exportCode, importCode } from '../sim/save';
 import { comfort, count, dist, has, hallLevel, heroCap, heroMaxHp, invGet, invTotal, levelStats, procStats, reqMet, storageCap, type Building, type GameEvent, type World } from '../sim/world';
-import type { Ghost, View } from '../render3d/View';
-import { lineCells, perimeterCells, snap, validSpots } from '../sim/grid';
+import type { BuildView, View } from '../render3d/View';
+import { DISTRICT_NAME, DISTRICT_OF, ROUTE_NAME, SOCKET_OF, centreAt, plotCentre, plotTaken, plotsNow, socketTaken, sockets, fits, spotsFor, type Plot, type Socket } from '../sim/plan';
+import { raiseWall } from '../sim/economy';
 import { audio, audioInit, setMusic, setSound, sfx } from '../platform/audio';
 import { G } from './glyphs';
 import { clearSave, saveSettings } from '../platform/storage';
@@ -22,16 +23,16 @@ const TUT: { text: string; done: (w: World) => boolean }[] = [
   { text: 'Продай дрова Пані Сові на жовтому майданчику', done: w => w.stats.earned >= 6 },
   { text: 'Стань на пунктирну ділянку з ціною: монети підуть у будову', done: w => has(w, 'houseGatherer') },
   { text: 'Наступна ділянка: Лісопилка. Дошки потрібні для всього', done: w => has(w, 'sawmill') },
-  { text: 'Біля Сови черга: стань на «Продати», віддай замовлене, забери монети з прилавка', done: w => w.stats.earned >= 60 },
+  { text: 'Збудуй Крамницю: покупці купуватимуть з її полиць самі', done: w => has(w, 'store') },
   { text: 'Постав Костер: світло обпікає нічних звірів', done: w => has(w, 'bonfire') },
-  { text: 'Огороди містечко частоколом перед першою ніччю', done: w => count(w, 'palisade') >= 3 },
+  { text: 'Будівництво → «Звести мур»: мур по краю міста, носії довезуть дошки', done: w => count(w, 'palisade') >= 3 },
 ];
 
 export class Hud {
   input: Input = { x: 0, y: 0 };
   started = false; paused = false;
   scene: View | null = null;
-  build = { active: false, ghost: null as Ghost | null, selected: null as string | null, cat: 'eco' as Category, why: '', spots: [] as { x: number; y: number }[], anchor: null as { x: number; y: number } | null };
+  build: BuildView & { cat: Category } = { active: false, pick: null, spot: null, moving: null, selected: null, cat: 'eco' };
   private cardFor: string | null = null; private cardSig = ''; private chipFor: string | null = null;
   private toastT = 0; private shown = { coins: -1, bag: '', hp: '', clock: '', tut: '' };
   private joy = { on: false, id: -1, ox: 0, oy: 0, sx: 0, sy: 0, moved: false };
@@ -103,9 +104,8 @@ export class Hud {
     $('bMenu').onclick = () => this.toggleMenu();
     $('bBuild').onclick = () => (this.build.active ? this.exitBuild() : this.enterBuild());
     $('chip').onclick = () => { if (this.chipFor) this.openCard(this.chipFor); };
-    $('bOk').onclick = () => this.confirmGhost();
-    $('bRing').onclick = () => this.ringTown();
-    $('bCancel').onclick = () => { if (this.build.ghost) { this.build.ghost = null; this.build.anchor = null; this.build.spots = []; this.renderDrawer(); } else this.exitBuild(); };
+    $('bRing').onclick = () => { const n = raiseWall(this.w); this.toast(n ? 'Мур закладено' : 'Мур уже стоїть', n ? `${n} секцій чекають на дошки: носії довезуть.` : 'Усі секції на місці або бракує ліміту Ратуші.'); this.renderDrawer(); };
+    $('bCancel').onclick = () => { if (this.build.pick || this.build.spot || this.build.moving) { this.clearPick(); this.renderDrawer(); } else this.exitBuild(); };
     $('mResume').onclick = () => this.toggleMenu(false);
     $('mMusic').onclick = () => { setMusic(!audio.music); saveSettings(audio); this.menuRefresh(); };
     $('mExport').onclick = () => { const code = exportCode(this.w), ta = $<HTMLTextAreaElement>('mCode'); ta.value = code; ta.select(); navigator.clipboard?.writeText(code).then(() => this.status('Код скопійовано. Збережи його в нотатках.'), () => this.status('Код виділено: скопіюй його вручну.')); };
@@ -174,7 +174,6 @@ export class Hud {
       if (!b || (!this.build.active && dist(w.hero.x, w.hero.y, b.x, b.y) > BUILD[b.type].r + 140)) this.closeCard();
       else this.renderCard(false);
     }
-    if (this.build.active) this.updateGhost();
   }
 
   // ---------------------------------------------------------------- cards
@@ -191,7 +190,7 @@ export class Hud {
   }
   private renderCard(force: boolean) {
     const w = this.w, b = this.cardFor ? w.buildings[this.cardFor] : null; if (!b) return;
-    const sig = JSON.stringify([b.level, b.spec, b.status, Math.ceil(b.hp), Math.floor(b.fuel), b.store, b.input, b.site, b.gather, b.queue, b.want, w.coins, w.up, w.units.length, w.cats.map(c => c.idle + (c.task?.to || '')), this.build.active, w.clock.phase]);
+    const sig = JSON.stringify([b.level, b.spec, b.status, Math.ceil(b.hp), Math.floor(b.fuel), b.store, b.input, b.site, b.gather, b.queue, b.want, b.routes, b.till, w.coins, w.up, w.units.length, w.cats.map(c => c.idle + (c.task?.to || '')), this.build.active, w.clock.phase]);
     if (!force && sig === this.cardSig) return;
     this.cardSig = sig;
     const el = $('card'); el.innerHTML = '';
@@ -216,7 +215,7 @@ export class Hud {
     }
     if (this.build.active && !def.noBuild) {
       const r = this.h('div', 'mrow');
-      r.append(this.btn(`${G.move} Перемістити`, null, () => { this.build.ghost = { type: b.type, x: b.x, y: b.y, ok: true, moving: b.id }; this.build.spots = validSpots(w, b.type, b.id); this.closeCard(); this.renderDrawer(); return false; }, false, 'ubtn ghost'));
+      if (DISTRICT_OF[b.type] || SOCKET_OF[b.type]) r.append(this.btn(`${G.move} Перенести`, null, () => { this.clearPick(); this.build.moving = b.id; this.closeCard(); this.renderDrawer(); return false; }, false, 'ubtn ghost'));
       const dz = this.btn(`${G.trash} Знести`, null, () => { if (this.armDemolish !== b.id) { this.armDemolish = b.id; dz.querySelector('span')!.innerHTML = `${G.trash} Точно знести? +50% монет`; dz.classList.add('danger'); return false; } demolish(w, b); this.armDemolish = null; this.closeCard(); return false; }, false, 'ubtn ghost');
       r.append(dz);
       el.append(r);
@@ -234,6 +233,13 @@ export class Hud {
       rows.append(this.row('Паливо', `${ico(def.fuel.item)} ${Math.floor(b.fuel)} / ${def.fuel.cap}`, b.fuel > def.fuel.cap * 0.25));
       rows.append(this.row('Міцність', `${Math.ceil(b.hp)} / ${b.maxHp}`, b.hp >= b.maxHp));
       el.append(rows, this.h('p', 'tip', `Носії самі підкидають ${ITEMS[def.fuel.item].name.toLowerCase()} зі складу. Можна й самому: стань на помаранчевий майданчик.`)); return;
+    }
+    if (b.type === 'store') {
+      rows.append(this.row('На прилавку', `<span class="cost">${ico('coins')}${b.till || 0}</span>`, !(b.till)));
+      rows.append(this.row('Полиці', `${invTotal(b.store)} / ${levelStats(b).cap}`));
+      for (const k of ['log', 'plank', 'berry', 'stone', 'candle', 'lav'] as ItemId[]) if (invGet(b.store, k) || w.visitors.some(v => v.want === k)) rows.append(this.row(`${ico(k)} ${ITEMS[k].name}`, String(invGet(b.store, k)), invGet(b.store, k) > 0));
+      el.append(rows, this.h('p', 'tip', `У черзі ${w.visitors.filter(v => v.state !== 'leave').length}. Стань на «Каса», щоб забрати монети, або на «Прийом», щоб докласти товар з рюкзака.`));
+      return;
     }
     if (b.type === 'storage') {
       rows.append(this.row('Заповнено', `${invTotal(b.store)} / ${storageCap(b)}`, invTotal(b.store) < storageCap(b)));
@@ -268,7 +274,17 @@ export class Hud {
       if (b.queue?.length) rows.append(this.row('Черга', b.queue.map(k => pic('u:' + k)).join(' ')));
       el.append(rows);
       for (const [k, u] of Object.entries(UNITS) as [keyof typeof UNITS, (typeof UNITS)[keyof typeof UNITS]][]) el.append(this.btn(`${pic('u:' + k)} Навчити: ${u.name}`, u.cost, () => trainUnit(w, b, k)));
-      el.append(this.h('p', 'tip', 'Постав 🚩 Пости варти і признач на кожен потрібну кількість воїнів. Поранені лікуються тут.'));
+      el.append(this.h('p', 'sub', 'Нічні патрулі'));
+      const r = b.routes || (b.routes = { ring: 2, ns: 1, ew: 1 });
+      for (const k of ['ring', 'ns', 'ew'] as const) {
+        const row = this.h('div', 'urow'); row.append(this.h('div', 'ic'));
+        const mid = this.h('div'); mid.append(this.h('div', 'nm', ROUTE_NAME[k]), this.h('div', 'ds', `хочу ${r[k]} · зараз ${w.units.filter(u => u.post === k).length}`)); row.append(mid);
+        const pm = this.h('div', 'pm');
+        const minus = this.h('button', 'segb', '−') as HTMLButtonElement; minus.onclick = () => { r[k] = Math.max(0, r[k] - 1); this.cardSig = ''; this.renderCard(true); };
+        const plus = this.h('button', 'segb', '+') as HTMLButtonElement; plus.onclick = () => { r[k] = Math.min(12, r[k] + 1); this.cardSig = ''; this.renderCard(true); };
+        pm.append(minus, plus); row.append(pm); el.append(row);
+      }
+      el.append(this.h('p', 'tip', 'Уночі воїни з ліхтарями ходять по муру й дорогах і ловлять звірів, що прорвалися. Поранені лікуються тут.'));
       return;
     }
     if (b.type === 'post') {
@@ -311,95 +327,72 @@ export class Hud {
     }
   }
 
-  // ---------------------------------------------------------------- build mode
-  enterBuild() { this.build.active = true; this.build.ghost = null; this.build.selected = null; this.build.anchor = null; this.build.spots = []; document.body.classList.add('building'); this.closeCard(); this.renderDrawer(); }
-  exitBuild() { this.build.active = false; this.build.ghost = null; this.build.selected = null; this.build.anchor = null; this.build.spots = []; document.body.classList.remove('building'); $('drawer').classList.remove('on'); this.closeCard(); this.scene?.focus(); }
+  // ---------------------------------------------------------------- build mode: plots and sockets from the master plan
+  enterBuild() { this.build.active = true; this.clearPick(); this.build.selected = null; document.body.classList.add('building'); this.closeCard(); this.renderDrawer(); }
+  exitBuild() { this.build.active = false; this.clearPick(); this.build.selected = null; document.body.classList.remove('building'); $('drawer').classList.remove('on'); this.closeCard(); this.scene?.focus(); }
+  private clearPick() { this.build.pick = null; this.build.spot = null; this.build.moving = null; }
+  private spotLabel(id: string) { const p = plotsNow(this.w).find(x => x.id === id); if (p) return `${DISTRICT_NAME[p.district]}, ділянка ${p.size}×${p.size}`; const s = sockets(this.w).find(x => 'socket:' + x.id === id); return s ? (s.kind === 'tower' ? 'Гніздо башти на мурі' : s.kind === 'lantern' ? 'Гніздо ліхтаря' : 'Гніздо вогню біля брами') : ''; }
+  private typesFor(id: string): BuildingType[] {
+    const p = plotsNow(this.w).find(x => x.id === id), s = sockets(this.w).find(x => 'socket:' + x.id === id);
+    return (Object.keys(BUILD) as BuildingType[]).filter(t => !BUILD[t].noBuild && (p ? fits(t, p) : s ? !!SOCKET_OF[t]?.includes(s.kind) : false));
+  }
   private renderDrawer() {
-    const w = this.w, d = $('drawer'), g = this.build.ghost; d.classList.add('on');
-    $('bOk').hidden = !g;
-    const cont = g && BUILD[g.type].continuous && !g.moving;
-    $('buildHint').textContent = !g ? 'Обери будівлю. Або торкнись будівлі на мапі, щоб перемістити чи знести.'
-      : g.moving ? 'Торкнись нової клітинки і підтверди. Зелене: сюди влізе.'
-      : cont ? (this.build.anchor ? 'Торкнись кінця лінії, потім «Поставити». Або обнеси все містечко.' : 'Торкнись початку лінії частоколу.')
-      : 'Зелені клітинки: сюди влізе. Жовті лишаються проходом. Тягни пальцем, щоб рухати камеру.';
-    const tabs = $('tabs'); tabs.innerHTML = '';
-    for (const c of CATEGORIES) { const b = this.h('button', 'tab' + (this.build.cat === c.id ? ' on' : '')); b.innerHTML = `${G[c.id as keyof typeof G]}<span>${c.name}</span>`; b.onclick = () => { this.build.cat = c.id; this.renderDrawer(); }; tabs.append(b); }
+    const w = this.w, d = $('drawer'), st = this.build; d.classList.add('on');
+    $('bOk').hidden = true;
+    $('bRing').hidden = !!buildLock(w, 'palisade');
+    const mv = st.moving ? w.buildings[st.moving] : null;
+    $('buildHint').textContent = mv ? `Перенести «${BUILD[mv.type].name}»: торкнись підсвіченої вільної ділянки.`
+      : st.spot ? `${this.spotLabel(st.spot)}. Обери, що тут звести.`
+      : st.pick ? `«${BUILD[st.pick].name}»: торкнись підсвіченої ділянки на мапі.`
+      : 'Торкнись порожньої ділянки чи гнізда на мапі або обери будівлю нижче.';
+    const tabs = $('tabs'); tabs.innerHTML = ''; tabs.hidden = !!st.spot;
+    for (const c of CATEGORIES) { const b = this.h('button', 'tab' + (st.cat === c.id ? ' on' : '')); b.innerHTML = `${G[c.id as keyof typeof G]}<span>${c.name}</span>`; b.onclick = () => { st.cat = c.id; this.renderDrawer(); }; tabs.append(b); }
     const list = $('blist'); list.innerHTML = '';
-    for (const [type, def] of Object.entries(BUILD) as [BuildingType, (typeof BUILD)[BuildingType]][]) {
-      if (def.cat !== this.build.cat || def.noBuild) continue;
-      const lock = buildLock(w, type), afford = w.coins >= (def.cost.coins || 0);
-      const card = this.h('button', 'bitem' + (lock ? ' locked' : !afford ? ' poor' : '') + (g?.type === type && !g.moving ? ' on' : '')) as HTMLButtonElement;
+    const types = st.spot ? this.typesFor(st.spot) : (Object.keys(BUILD) as BuildingType[]).filter(t => BUILD[t].cat === st.cat && !BUILD[t].noBuild && t !== 'palisade');
+    if (st.spot && !types.length) list.append(this.h('p', 'tip dim', 'Тут поки нічого не можна звести.'));
+    for (const type of types) {
+      const def = BUILD[type], lock = buildLock(w, type), afford = w.coins >= (def.cost.coins || 0), free = spotsFor(w, type).length;
+      const where = DISTRICT_OF[type] ? DISTRICT_OF[type]!.map(x => DISTRICT_NAME[x]).join(', ') : SOCKET_OF[type] ? 'гнізда на мурі' : '';
+      const card = this.h('button', 'bitem' + (lock ? ' locked' : !afford ? ' poor' : '') + (st.pick === type ? ' on' : '')) as HTMLButtonElement;
       const max = def.max?.[hallLevel(w) - 1];
-      card.innerHTML = `<div class="bi">${bIcon(type, 'thumb')}</div><div class="bn">${def.name}</div><div class="bc">${lock ? G.lock + ' ' + lock : costLine(def.cost)}</div>${max !== undefined && !lock ? `<div class="bm">${count(w, type)}/${max}</div>` : ''}`;
+      card.innerHTML = `<div class="bi">${bIcon(type, 'thumb')}</div><div class="bn">${def.name}</div><div class="bc">${lock ? G.lock + ' ' + lock : !free && !st.spot ? 'немає вільного місця' : costLine(def.cost)}</div>${max !== undefined && !lock ? `<div class="bm">${count(w, type)}/${max}</div>` : ''}${where && !st.spot ? `<div class="bw">${where}</div>` : ''}`;
       card.disabled = !!lock;
       card.title = def.desc;
       card.onclick = () => {
-        if (!afford) { this.toast('Бракує монет', `${def.name}: потрібно ${def.cost.coins} монет. Матеріали можна довезти потім.`); return; }
-        this.build.spots = validSpots(w, type); this.build.anchor = null;
-        const spot = this.freeSpot(type); this.build.ghost = { type, x: spot.x, y: spot.y, ok: false }; this.build.selected = null; this.closeCard(); this.renderDrawer(); this.updateGhost(); sfx('pick');
+        if (!afford) { this.toast('Бракує монет', `${def.name}: потрібно ${def.cost.coins} монет. Матеріали довезуть потім.`); return; }
+        if (st.spot) { this.placeOn(type, st.spot); return; }
+        st.pick = st.pick === type ? null : type; this.closeCard(); this.renderDrawer(); sfx('pick');
       };
       list.append(card);
     }
-    const gd = g ? BUILD[g.type] : null;
+    const gd = st.pick ? BUILD[st.pick] : mv ? BUILD[mv.type] : null;
     $('bdesc').innerHTML = gd ? `<b>${gd.name}.</b> ${gd.desc}` : '';
-    const ring = $('bRing'); ring.hidden = !cont;
   }
-  /** Nearest spot where the building fits, so a new ghost starts green. */
-  private freeSpot(type: BuildingType): { x: number; y: number } {
-    const h = this.w.hero; let best = null as null | { x: number; y: number }, bd = 1e9;
-    for (const s of this.build.spots) { const d = dist(h.x, h.y - 60, s.x, s.y); if (d < bd) { bd = d; best = s; } }
-    return best ?? snap(type, h.x, h.y - 100);
+  private spotCentre(type: BuildingType, id: string) {
+    const p = plotsNow(this.w).find(x => x.id === id); if (p) return centreAt(type, p.x, p.y);
+    const s = sockets(this.w).find(x => 'socket:' + x.id === id)!; return centreAt(type, s.x, s.y);
+  }
+  private placeOn(type: BuildingType, id: string) {
+    const w = this.w, c = this.spotCentre(type, id), why = placeCheck(w, type, c.x, c.y) || buildLock(w, type);
+    if (why) { this.toast('Не стане', why); return; }
+    if (place(w, type, c.x, c.y)) { sfx('drop'); this.clearPick(); this.renderDrawer(); }
+  }
+  /** Free plot or socket under a tap. */
+  private spotAt(x: number, y: number): string | null {
+    const w = this.w;
+    for (const s of sockets(w)) { if (socketTaken(w, s)) continue; const f = s.kind === 'tower' ? 2 : 1, c = { x: TC.x + (s.x + f / 2) * CELL, y: TC.y + (s.y + f / 2) * CELL }; if (Math.abs(x - c.x) < f * CELL / 2 + 6 && Math.abs(y - c.y) < f * CELL / 2 + 6) return 'socket:' + s.id; }
+    for (const p of plotsNow(w)) { if (plotTaken(w, p)) continue; const c = plotCentre(p); if (Math.abs(x - c.x) < p.size * CELL / 2 && Math.abs(y - c.y) < p.size * CELL / 2) return p.id; }
+    return null;
   }
   private buildTap(x: number, y: number) {
-    const w = this.w, g = this.build.ghost;
-    if (g) {
-      if (BUILD[g.type].continuous && !g.moving) {
-        const p = snap(g.type, x, y);
-        if (!this.build.anchor) { this.build.anchor = p; g.x = p.x; g.y = p.y; g.line = undefined; }
-        else g.line = lineCells(this.build.anchor, p).map(c => ({ ...c, ok: false }));
-        this.updateGhost(); this.renderDrawer(); sfx('drop'); return;
-      }
-      const p = snap(g.type, x, y); g.x = p.x; g.y = p.y; this.updateGhost(); sfx('drop'); return;
-    }
+    const w = this.w, st = this.build, spot = this.spotAt(x, y);
+    if (st.moving && spot) { const b = w.buildings[st.moving]; if (b) { const c = this.spotCentre(b.type, spot); if (moveBuilding(w, b, c.x, c.y)) { sfx('drop'); this.clearPick(); this.build.selected = b.id; } else this.toast('Не стане', placeCheck(w, b.type, c.x, c.y) || 'Інший розмір чи район'); } this.renderDrawer(); return; }
+    if (st.pick && spot) { this.placeOn(st.pick, spot); return; }
+    if (spot) { st.spot = spot; st.pick = null; this.closeCard(); this.renderDrawer(); sfx('pick'); return; }
     let best: Building | null = null, bd = 1e9;
     for (const b of Object.values(w.buildings)) { const r = BUILD[b.type].r; if (Math.abs(x - b.x) < r + 8 && Math.abs(y - b.y) < r + 8) { const d = dist(x, y, b.x, b.y); if (d < bd) { bd = d; best = b; } } }
-    this.build.selected = best?.id ?? null;
+    st.selected = best?.id ?? null; st.spot = null;
     if (best) this.openCard(best.id); else this.closeCard();
-  }
-  private ringTown() {
-    const g = this.build.ghost; if (!g) return;
-    g.line = perimeterCells(this.w).map(c => ({ ...c, ok: false })); this.build.anchor = { x: g.x, y: g.y };
-    this.updateGhost(); this.renderDrawer();
-  }
-  private updateGhost() {
-    const g = this.build.ghost, w = this.w; if (!g) return;
-    let why: string | null;
-    if (g.line) {
-      // a line: count what is affordable and fits; segments are checked one by one
-      const def = BUILD[g.type], each = def.cost.plank || 0; let fits = 0;
-      for (const p of g.line) { p.ok = !placeCheck(w, g.type, p.x, p.y); if (p.ok) fits++; }
-      const lock = buildLock(w, g.type), max = def.max?.[hallLevel(w) - 1] ?? 999, room = Math.max(0, max - count(w, g.type));
-      g.ok = !lock && fits > 0 && room > 0;
-      why = lock || (fits === 0 ? 'Тут не стане жодної секції' : room < fits ? `Поставиться ${room} з ${fits}: ліміт Ратуші` : `${fits} секцій · ${each * fits} дощок довезуть котики`);
-      if (g.ok && !lock) { $('ghostWhy').classList.add('ok'); } else $('ghostWhy').classList.remove('ok');
-    } else {
-      why = g.moving ? placeCheck(w, g.type, g.x, g.y, g.moving) : placeCheck(w, g.type, g.x, g.y) || buildLock(w, g.type);
-      g.ok = !why; $('ghostWhy').classList.remove('ok');
-    }
-    $<HTMLButtonElement>('bOk').disabled = !g.ok;
-    $('ghostWhy').textContent = why || '';
-    this.build.why = g.line ? '' : why || '';
-  }
-  private confirmGhost() {
-    const g = this.build.ghost, w = this.w; if (!g || !g.ok) return;
-    if (g.moving) { const b = w.buildings[g.moving]; if (b && moveBuilding(w, b, g.x, g.y)) { this.build.ghost = null; this.build.selected = b.id; this.build.spots = []; } }
-    else if (g.line) {
-      for (const p of g.line) if (p.ok && !buildLock(w, g.type) && w.coins >= (BUILD[g.type].cost.coins || 0)) place(w, g.type, p.x, p.y);
-      g.line = undefined; this.build.anchor = null; this.build.spots = validSpots(w, g.type); this.updateGhost();
-    } else {
-      const b = place(w, g.type, g.x, g.y);
-      if (b) { this.build.spots = validSpots(w, g.type); if (!buildLock(w, g.type) && w.coins >= (BUILD[g.type].cost.coins || 0) && this.build.spots.length) { const s = this.freeSpot(g.type); g.x = s.x; g.y = s.y; this.updateGhost(); } else { this.build.ghost = null; this.build.spots = []; } }
-    }
     this.renderDrawer();
   }
 }

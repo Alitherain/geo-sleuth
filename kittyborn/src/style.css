@@ -181,3 +181,4 @@ textarea { width: 100%; box-sizing: border-box; border-radius: 2px; border: 1px 
 #labels .bub.want { display: flex; align-items: center; gap: 3px; font-size: 14px; padding: 2px 8px 2px 4px; }
 #labels .bub.want img { height: 22px; }
 #labels .bub.want.low { background: #e0a07a; }
+.bw { font-size: 10.5px; color: #8f877a; letter-spacing: .03em; }

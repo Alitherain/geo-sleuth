@@ -1,7 +1,8 @@
-import { BUILD, HERO_UPG, ITEMS, PROJECTS, UNITS, type BuildingType, type Cost, type ItemId, type UnitKind } from '../content/data';
+import { BUILD, CELL, HERO_UPG, ITEMS, PROJECTS, TC, UNITS, type BuildingType, type Cost, type ItemId, type UnitKind } from '../content/data';
 import { allOf, available, costItems, count, firstOf, hallLevel, invAdd, invGet, levelStats, makeBuilding, procStats, reqMet, type Building, type World } from './world';
 import { syncCats } from './logistics';
-import { gridCheck, snap } from './grid';
+import { gridCheck, snap, townHalf } from './grid';
+import { DISTRICT_NAME, DISTRICT_OF, SOCKET_OF, centreAt, sockets, spotsFor, wallCells } from './plan';
 
 export const storage = (w: World): Building | undefined => firstOf(w, 'storage');
 
@@ -56,9 +57,18 @@ export function addFuel(w: World, b: Building, n: number) {
 }
 
 // ---------------------------------------------------------------- placement
-export function placeCheck(w: World, type: BuildingType, x: number, y: number, ignore?: string): string | null {
-  return gridCheck(w, type, x, y, ignore);
+/** Plan rule first (plot, socket or wall cell), then the grid rules (nodes, roads, lanes, reachability). */
+export function planCheck(w: World, type: BuildingType, x: number, y: number, ignore?: string): string | null {
+  const near = (p: { x: number; y: number }) => Math.abs(p.x - x) < 2 && Math.abs(p.y - y) < 2;
+  if (type === 'palisade') return wallCells(w).some(near) ? null : 'Мур стоїть лише по краю плану';
+  if (SOCKET_OF[type]) return spotsFor(w, type, ignore).some(near) ? null : 'Лише у вільному гнізді на мурі';
+  if (DISTRICT_OF[type]) return spotsFor(w, type, ignore).some(near) ? null : `Лише на вільній ділянці: ${DISTRICT_OF[type]!.map(d => DISTRICT_NAME[d]).join(', ')}`;
+  return null;
 }
+export function placeCheck(w: World, type: BuildingType, x: number, y: number, ignore?: string): string | null {
+  return planCheck(w, type, x, y, ignore) || gridCheck(w, type, x, y, ignore);
+}
+const socketAt = (w: World, type: BuildingType, x: number, y: number, ignore?: string) => spotsFor(w, type, ignore).find(p => Math.abs(p.x - x) < 2 && Math.abs(p.y - y) < 2)?.socket;
 export function buildLock(w: World, type: BuildingType): string | null {
   const def = BUILD[type];
   if (def.noBuild) return 'Вже є';
@@ -74,7 +84,7 @@ export function place(w: World, type: BuildingType, x: number, y: number): Build
   if (buildLock(w, type) || placeCheck(w, type, x, y) || w.coins < (def.cost.coins || 0)) return null;
   w.coins -= def.cost.coins || 0;
   const items = Object.fromEntries(costItems(def.cost)) as Partial<Record<ItemId, number>>;
-  const b = makeBuilding(w, type, x, y, { site: Object.keys(items).length ? items : null });
+  const b = makeBuilding(w, type, x, y, { site: Object.keys(items).length ? items : null, socket: socketAt(w, type, x, y) });
   w.events.push({ t: 'placed', x, y });
   if (!b.site) completeSite(w, b);
   return b;
@@ -98,6 +108,7 @@ export function deliverToSite(w: World, b: Building, k: ItemId, n = 1) {
 export function moveBuilding(w: World, b: Building, x: number, y: number): boolean {
   ({ x, y } = snap(b.type, x, y));
   if (placeCheck(w, b.type, x, y, b.id)) return false;
+  b.socket = socketAt(w, b.type, x, y, b.id);
   b.x = x; b.y = y; w.events.push({ t: 'placed', x, y });
   return true;
 }
@@ -123,9 +134,30 @@ export function upgradeBuilding(w: World, b: Building): boolean {
   const hp = levelStats(b).hp; if (hp) { b.maxHp = hp; b.hp = hp; }
   b.builtAt = w.time;
   w.events.push({ t: 'upgrade', x: b.x, y: b.y });
-  if (b.type === 'hall') w.events.push({ t: 'toast', title: `Ратуша: ${nl.label.split(':')[0]}`, body: 'Межі містечка розширилися. Нові будівлі в меню будівництва.' });
+  if (b.type === 'hall') { relayout(w); w.events.push({ t: 'toast', title: `Ратуша: ${nl.label.split(':')[0]}`, body: 'Містечко виросло на кільце ділянок. Мур, башти й вогні переїхали на новий край, старий частокіл повернув половину дощок.' }); }
   syncCats(w);
   return true;
+}
+/** After the hall grows: clear the forest from the new area, take down the old wall (half the planks back),
+ * and move towers and lights to the same sockets on the new edge. */
+export function relayout(w: World) {
+  const A = (townHalf(w) + 4 + 1) * CELL;
+  w.nodes = w.nodes.filter(n => Math.abs(n.x - TC.x) > A || Math.abs(n.y - TC.y) > A);
+  let planks = 0;
+  for (const b of Object.values(w.buildings)) if (b.type === 'palisade') { planks += Math.floor((b.level > 1 ? 3 : 3) / 2); delete w.buildings[b.id]; }
+  const st = allOf(w, 'storage')[0]; if (st && planks) invAdd(st.store, 'plank', planks); else w.coins += planks * ITEMS.plank.price;
+  const S = sockets(w);
+  for (const b of Object.values(w.buildings)) {
+    if (!b.socket) continue;
+    const s = S.find(x => x.id === b.socket); if (!s) continue;
+    const c = centreAt(b.type, s.x, s.y); b.x = c.x; b.y = c.y;
+  }
+}
+/** Build the whole wall at once on every free wall cell (each segment is a site waiting for planks). */
+export function raiseWall(w: World): number {
+  let n = 0;
+  for (const c of wallCells(w)) { if (buildLock(w, 'palisade')) break; if (!placeCheck(w, 'palisade', c.x, c.y)) { if (place(w, 'palisade', c.x, c.y)) n++; } }
+  return n;
 }
 export function chooseSpec(w: World, b: Building, id: string): boolean {
   const s = BUILD[b.type].specs?.find(x => x.id === id);
@@ -146,7 +178,7 @@ export function doProject(w: World, id: keyof typeof PROJECTS): boolean {
   if (w.flags[id] || reqMet(w, p.req) || !spend(w, p.cost)) return false;
   w.flags[id] = true;
   w.events.push({ t: 'toast', title: p.name, body: p.desc });
-  w.events.push({ t: 'build', x: 500, y: 1000 });
+  w.events.push({ t: 'build', x: 500, y: TC.y });
   return true;
 }
 

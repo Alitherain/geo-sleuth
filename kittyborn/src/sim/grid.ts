@@ -102,6 +102,7 @@ export function gridCheck(w: World, type: BuildingType, x0: number, y0: number, 
   // big buildings keep a one-cell lane around them, so the town never turns into a maze
   if (f >= 2 && !WALKABLE(type)) for (let a = -1; a <= f; a++) for (let c = -1; c <= f; c++) {
     if (a >= 0 && a < f && c >= 0 && c < f) continue;
+    if ((a < 0 || a >= f) && (c < 0 || c >= f)) continue; // touching only at a corner leaves both lanes open
     const u = occ.get(key(o.i + a, o.j + c));
     if (u && u.kind === 'fp' && !u.walk && (BUILD[w.buildings[u.id]?.type]?.fp || 1) >= 2) return 'Залиш прохід між будівлями';
   }

@@ -15,25 +15,25 @@ export const ITEM_IDS = Object.keys(ITEMS) as ItemId[];
 export type Cost = Partial<Record<ItemId | 'coins', number>>;
 
 // ---------------------------------------------------------------- map
-export const W = 3000, H = 2000;
+export const W = 3200, H = 2600;
 export interface Rect { x: number; y: number; w: number; h: number }
-export const TC = { x: 1500, y: 1000 };                       // town centre
+export const TC = { x: 1500, y: 1300 };                       // town centre
 export const CELL = 48;                                         // grid cell in world units
-export const TOWN_HALF = [8, 10, 12];                            // town square half-size in cells per hall level
-export const NEAR_CELLS = 6;                                    // defence ring beyond the town edge, in cells
+export const TOWN_HALF = [8, 11, 14];                            // town square half-size in cells per hall level
+export const NEAR_CELLS = 4;                                    // defence ring beyond the town edge, in cells
 export const TOWN_R = TOWN_HALF.map(h => h * CELL);
-export const EDGE: Rect = { x: 560, y: 160, w: 340, h: 1680 };  // Смарагдовий Узлісок
-export const GROVE: Rect = { x: 110, y: 160, w: 360, h: 1680 }; // Лавандовий Гай
-export const HILLS: Rect = { x: 1050, y: 110, w: 1000, h: 280 }; // Кам'яні Пагорби
-export const MEADOW: Rect = { x: 1100, y: 1610, w: 900, h: 340 }; // Ягідна Галявина
-export const WILDS: Rect = { x: 2250, y: 160, w: 690, h: 1680 };  // Пустище
+export const EDGE: Rect = { x: 560, y: 160, w: 340, h: 2280 };  // Смарагдовий Узлісок
+export const GROVE: Rect = { x: 110, y: 160, w: 360, h: 2280 }; // Лавандовий Гай
+export const HILLS: Rect = { x: 1050, y: 110, w: 1000, h: 290 }; // Кам'яні Пагорби
+export const MEADOW: Rect = { x: 1100, y: 2200, w: 900, h: 330 }; // Ягідна Галявина
+export const WILDS: Rect = { x: 2420, y: 160, w: 720, h: 2280 };  // Пустище
 export const HEDGE_X = 500;
-export const ROAD_Y = 1000;
+export const ROAD_Y = 1300;
 export const SPAWNS: Record<string, { x: number; y: number; name: string }> = {
   N: { x: 1500, y: 90, name: 'з півночі' },
-  E: { x: 2930, y: 1000, name: 'зі сходу' },
-  S: { x: 1500, y: 1940, name: 'з півдня' },
-  W: { x: 70, y: 1000, name: 'із заходу' },
+  E: { x: 3130, y: 1300, name: 'зі сходу' },
+  S: { x: 1500, y: 2540, name: 'з півдня' },
+  W: { x: 70, y: 1300, name: 'із заходу' },
 };
 
 // ---------------------------------------------------------------- buildings
@@ -42,10 +42,10 @@ export type BuildingType =
   | 'houseGatherer' | 'houseQuarry' | 'houseForager' | 'houseHauler' | 'houseMaster'
   | 'sawmill' | 'storage' | 'forge' | 'candleShop' | 'bell'
   | 'palisade' | 'tower' | 'barracks' | 'post'
-  | 'flowerbed' | 'bench' | 'banner' | 'fountain';
+  | 'flowerbed' | 'bench' | 'banner' | 'fountain' | 'store';
 export type CatRole = 'gatherer' | 'hauler' | 'master';
 export type GatherKind = 'wood' | 'stone' | 'berry';
-export type SlotKind = 'sell' | 'deposit' | 'in' | 'out' | 'forge' | 'bell' | 'fuel';
+export type SlotKind = 'sell' | 'deposit' | 'in' | 'out' | 'forge' | 'bell' | 'fuel' | 'till';
 export type Category = 'eco' | 'light' | 'defense' | 'cats' | 'decor';
 export type Req = { b?: BuildingType; hall?: number; flag?: string };
 
@@ -67,8 +67,8 @@ export const BUILD: Record<BuildingType, BuildDef> = {
   hall: { name: 'Ратуша', icon: '🏛️', desc: 'Серце містечка. Рівень Ратуші розширює межі й відкриває нові будівлі.', cat: 'eco', r: 58, cost: {}, req: [], zone: 'town', noBuild: true,
     levels: [
       { cost: {}, stats: { half: 8 }, label: 'Хутір' },
-      { cost: { coins: 150, plank: 30, stone: 15 }, stats: { half: 10 }, label: 'Містечко: ширші межі, Казарма, Свічкарня' },
-      { cost: { coins: 450, plank: 60, stone: 40, lav: 20, candle: 10 }, stats: { half: 12 }, label: 'Місто: найширші межі, кам\'яні мури' },
+      { cost: { coins: 150, plank: 30, stone: 15 }, stats: { half: 11 }, label: 'Містечко: ширші межі, Казарма, Свічкарня' },
+      { cost: { coins: 450, plank: 60, stone: 40, lav: 20, candle: 10 }, stats: { half: 14 }, label: 'Місто: найширші межі, кам\'яні мури' },
     ] },
   shop: { name: 'Лавка Пані Сови', icon: '🦉', desc: 'Купує все. Ху-ху.', cat: 'eco', r: 46, cost: {}, req: [], zone: 'town', noBuild: true, slots: [{ kind: 'sell', dx: 0, dy: 62 }] },
   heart: { name: 'Великий Костер', icon: '🔥', desc: 'Головне світло. Якщо згасне все світло — ніч програна.', cat: 'light', r: 26, cost: {}, req: [], zone: 'town', noBuild: true, hp: 150,
@@ -100,13 +100,16 @@ export const BUILD: Record<BuildingType, BuildDef> = {
   candleShop: { name: 'Свічкарня', icon: '🕯️', desc: 'М\'ясо (жир) → свічки для ліхтарів. Свічки ще й дорого продаються.', cat: 'eco', r: 40, cost: { coins: 90, plank: 15, stone: 10 }, req: [{ hall: 2 }], max: [0, 1, 2], zone: 'town',
     slots: [{ kind: 'in', dx: -46, dy: 56 }, { kind: 'out', dx: 46, dy: 56 }], proc: { input: 'meat', output: 'candle', time: 2.5, inCap: 10, outCap: 20 } },
   bell: { name: 'Дзвін Ночі', icon: '🔔', desc: 'Покликати ніч раніше за розкладом: +25% нагороди.', cat: 'defense', r: 22, cost: { coins: 25, plank: 6 }, req: [{ b: 'storage' }], max: [1, 1, 1], zone: 'town', slots: [{ kind: 'bell', dx: 0, dy: 48 }] },
-  palisade: { name: 'Частокіл', icon: '🪵', desc: 'Секція огорожі. Тягни лінію або обнеси все містечко одним дотиком. Звірі гризуть її замість світла.', cat: 'defense', r: 20, cost: { plank: 3 }, req: [{ b: 'sawmill' }], max: [80, 100, 130], zone: 'near', hp: 60, continuous: true,
+  palisade: { name: 'Частокіл', icon: '🪵', desc: 'Мур навколо містечка. Ставиться весь одразу по краю плану, друзі проходять крізь нього. Звірі гризуть її замість світла.', cat: 'defense', r: 20, cost: { plank: 1 }, req: [{ b: 'sawmill' }], max: [80, 100, 130], zone: 'near', hp: 60, continuous: true,
     levels: [{ cost: {}, stats: { hp: 60 }, label: 'Дерев\'яний, міцність 60' }, { cost: { stone: 3 }, stats: { hp: 170 }, label: 'Кам\'яний мур, міцність 170' }] },
   tower: { name: 'Башта-рогатка', icon: '🏹', desc: 'Стріляє шишками по звірах.', cat: 'defense', r: 24, cost: { coins: 45, plank: 10, stone: 5 }, req: [{ b: 'forge' }], max: [2, 5, 9], zone: 'near', hp: 90,
     levels: [{ cost: {}, stats: { dmg: 2, rate: 1.0, range: 190 }, label: 'Шишка раз на секунду' }, { cost: { coins: 80, lav: 8, stone: 6 }, stats: { dmg: 3.5, rate: 0.7, range: 220 }, label: 'Лавандові шишки, частіше' }] },
-  barracks: { name: 'Казарма Котячої Варти', icon: '⚔️', desc: 'Навчає котиків-воїнів. Їх розставляєш по постах.', cat: 'defense', r: 46, cost: { coins: 110, plank: 20, stone: 10 }, req: [{ hall: 2 }], max: [0, 1, 2], zone: 'town',
+  barracks: { name: 'Казарма Котячої Варти', icon: '⚔️', desc: 'Навчає котиків-воїнів і відправляє їх у нічні патрулі по муру й дорогах.', cat: 'defense', r: 46, cost: { coins: 110, plank: 20, stone: 10 }, req: [{ hall: 2 }], max: [0, 1, 2], zone: 'town',
     levels: [{ cost: {}, stats: { units: 4 }, label: 'До 4 воїнів' }, { cost: { coins: 160, plank: 20, stone: 15 }, stats: { units: 8 }, label: 'До 8 воїнів' }, { cost: { coins: 320, stone: 30, lav: 10 }, stats: { units: 12 }, label: 'До 12 воїнів' }] },
-  post: { name: 'Пост варти', icon: '🚩', desc: 'Точка оборони. Признач, скільки воїнів тут стоїть.', cat: 'defense', r: 14, cost: { coins: 10, plank: 2 }, req: [{ b: 'barracks' }], max: [0, 4, 8], zone: 'near' },
+  post: { name: 'Пост варти', icon: '', desc: 'Замінено патрулями.', cat: 'defense', r: 14, cost: {}, req: [], zone: 'near', noBuild: true },
+  store: { name: 'Крамниця', icon: '', desc: 'Свій склад і полиці. Носії підвозять надлишок зі складу міста, покупці купують самі за подвійну ціну. Монети забирай із прилавка.', cat: 'eco', r: 40, cost: { coins: 40, plank: 8 }, req: [{ b: 'storage' }], max: [1, 1, 2], zone: 'town',
+    slots: [{ kind: 'in', dx: -1, dy: 0 }, { kind: 'till', dx: 1, dy: 0 }],
+    levels: [{ cost: {}, stats: { cap: 40 }, label: 'Полиці на 40' }, { cost: { coins: 120, plank: 15 }, stats: { cap: 70 }, label: 'Полиці на 70, швидша торгівля' }, { cost: { coins: 260, stone: 15, candle: 5 }, stats: { cap: 110 }, label: 'Полиці на 110' }] },
   flowerbed: { name: 'Квітник', icon: '🌷', desc: 'Затишок +1: котики трохи швидші.', cat: 'decor', r: 18, cost: { coins: 8, berry: 2 }, req: [], max: [4, 8, 14], zone: 'town', comfort: 1 },
   bench: { name: 'Лавочка', icon: '🪑', desc: 'Затишок +1.', cat: 'decor', r: 18, cost: { plank: 5 }, req: [{ b: 'sawmill' }], max: [3, 6, 10], zone: 'town', comfort: 1 },
   banner: { name: 'Прапор Ліхтарників', icon: '🎏', desc: 'Затишок +2.', cat: 'decor', r: 12, cost: { coins: 15, fluff: 3 }, req: [{ hall: 2 }], max: [0, 4, 8], zone: 'town', comfort: 2 },
@@ -114,7 +117,7 @@ export const BUILD: Record<BuildingType, BuildDef> = {
 };
 // Grid footprints. Pads sit in the row right in front of a building; that row stays free so nothing gets walled in.
 const FP: Record<BuildingType, number> = { hall: 4, shop: 3, heart: 2, bonfire: 1, lantern: 1, ledLamp: 1, houseGatherer: 2, houseQuarry: 2, houseForager: 2, houseHauler: 2, houseMaster: 2,
-  sawmill: 3, storage: 3, forge: 2, candleShop: 3, bell: 1, palisade: 1, tower: 2, barracks: 3, post: 1, flowerbed: 1, bench: 1, banner: 1, fountain: 2 };
+  sawmill: 3, storage: 3, forge: 2, candleShop: 3, bell: 1, palisade: 1, tower: 2, barracks: 3, post: 1, flowerbed: 1, bench: 1, banner: 1, fountain: 2, store: 3 };
 for (const [t, def] of Object.entries(BUILD) as [BuildingType, BuildDef][]) {
   const fp = FP[t]; def.fp = fp; def.r = fp * CELL / 2;
   for (const sl of def.slots || []) { const col = sl.dx < 0 ? 0 : sl.dx > 0 ? fp - 1 : (fp - 1) / 2; sl.dx = (col - (fp - 1) / 2) * CELL; sl.dy = fp * CELL / 2 + CELL / 2; }

@@ -22,7 +22,10 @@ export interface Building {
   fuel: number;                // light sources
   gather?: GatherKind;         // gatherer houses
   queue?: UnitKind[]; trainT?: number; // barracks
-  want?: Record<UnitKind, number>;      // posts
+  want?: Record<UnitKind, number>;      // posts (legacy)
+  socket?: string;             // towers and lights: which wall socket they occupy
+  routes?: { ring: number; ns: number; ew: number }; // barracks: patrol sizes
+  till?: number;               // store: coins on the counter
 }
 export type TaskKind = 'haul' | 'harvest';
 export interface Task { kind: TaskKind; item?: ItemId; from?: string; to?: string; n: number; stage: 'toSource' | 'toTarget' | 'work'; node?: number }
@@ -33,7 +36,7 @@ export interface Cat {
 }
 export interface Unit {
   id: number; kind: UnitKind; home: string; post: string | null; x: number; y: number; face: number; walkT: number; moving: boolean;
-  hp: number; maxHp: number; woundT: number; swingT: number; swing: number; stuckT: number; lx: number; ly: number;
+  hp: number; maxHp: number; woundT: number; swingT: number; swing: number; stuckT: number; lx: number; ly: number; wp?: number;
 }
 export interface Enemy {
   id: number; kind: EnemyKind; x: number; y: number; z: number; vz: number; hp: number; maxHp: number; r: number;
@@ -133,7 +136,8 @@ export function makeBuilding(w: World, type: BuildingType, x: number, y: number,
   const id = extra.id || type + '_' + w.nextId++;
   const b: Building = { id, type, x, y, level: 1, spec: null, hp, maxHp: hp, store: {}, input: {}, reserved: {}, incoming: {}, t: 0, frac: 0, builtAt: w.time, status: '', fireT: 0, site: null, fuel: def.fuel ? def.fuel.cap * 0.6 : 0, ...extra };
   if (def.role === 'gatherer') b.gather = def.gather || b.gather || 'wood';
-  if (type === 'barracks') { b.queue = b.queue || []; b.trainT = 0; }
+  if (type === 'barracks') { b.queue = b.queue || []; b.trainT = 0; b.routes = b.routes || { ring: 2, ns: 1, ew: 1 }; }
+  if (type === 'store') b.till = b.till || 0;
   if (type === 'post') b.want = b.want || { spear: 2, sling: 0 };
   w.buildings[id] = b;
   return b;
@@ -142,7 +146,7 @@ export function makeBuilding(w: World, type: BuildingType, x: number, y: number,
 export function createWorld(): World {
   const w: World = {
     version: 3, time: 0, coins: 10, nextId: 1,
-    hero: { x: TC.x, y: TC.y + 4 * CELL, vx: 0, vy: 0, face: 1, walkT: 0, moving: false, stack: [], hp: 5, inv: 0, hurtT: 0, regenT: 0, dead: 0, swingT: 0, swing: 0, form: 'axe' },
+    hero: { x: TC.x, y: TC.y + 5 * CELL, vx: 0, vy: 0, face: 1, walkT: 0, moving: false, stack: [], hp: 5, inv: 0, hurtT: 0, regenT: 0, dead: 0, swingT: 0, swing: 0, form: 'axe' },
     nodes: [], buildings: {}, cats: [], units: [], enemies: [], ground: [], shots: [], offers: [], visitors: [], till: 0, visitT: 40,
     up: { bag: 0, axe: 0, boots: 0, heart: 0, mint: 0 },
     clock: { phase: 'day', t: 0, day: 1, n: 0, queue: [], reward: 0, title: '', dirs: [], dark: 0, early: false },
@@ -150,8 +154,8 @@ export function createWorld(): World {
   };
   // grid positions (see sim/grid.ts): hall on the crossroads, the fire and the owl in the southern quarters
   makeBuilding(w, 'hall', TC.x, TC.y, { id: 'hall' });
-  makeBuilding(w, 'heart', TC.x + 3 * CELL, TC.y + 3 * CELL, { id: 'heart', fuel: 30 });
-  makeBuilding(w, 'shop', TC.x - 3.5 * CELL, TC.y + 3.5 * CELL, { id: 'shop' });
+  makeBuilding(w, 'heart', TC.x + 3 * CELL, TC.y, { id: 'heart', fuel: 30 });          // on the east road beside the hall
+  makeBuilding(w, 'shop', TC.x - 6.5 * CELL, TC.y + 2.5 * CELL, { id: 'shop' });       // the Owl opens the market quarter
   genNodes(w);
   return w;
 }
