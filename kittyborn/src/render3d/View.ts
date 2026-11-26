@@ -7,6 +7,23 @@ import { townHalf } from '../sim/grid';
 import { SOCKET_OF, fits, plotTaken, plotsNow, socketTaken, sockets, spotsFor, type District } from '../sim/plan';
 import { C, ITEM_H, MAT, addGrain, buildingModel, catRig, enemyModel, heroRig, itemModel, nodeModel, padTexture, plotTexture, propGeo, toolModel, type Rig } from './models';
 import { offerCost } from '../sim/town';
+import { Actor, TARGET_H, hasAsset, loadAssets, staticModel } from './glb';
+
+// generated models replace procedural ones as soon as their GLB is loaded
+const CHAR_KEY = (kind: string) => kind === 'hero' ? 'hero' : kind === 'spear' || kind === 'sling' ? 'guard' : 'cat';
+const BUILD_KEY: Partial<Record<BuildingType, string>> = { shop: 'shop', hall: 'hall', sawmill: 'sawmill', store: 'store', storage: 'storage', forge: 'forge', candleShop: 'candleShop', barracks: 'barracks', tower: 'tower',
+  houseGatherer: 'house', houseQuarry: 'house', houseForager: 'house', houseHauler: 'house', houseMaster: 'house', bell: 'bell', fountain: 'fountain' };
+type ActorRig = Rig & { actor?: Actor };
+function mkRig(kind: string, procedural: () => Rig): ActorRig {
+  const key = CHAR_KEY(kind);
+  if (!hasAsset(key)) return procedural();
+  const h = TARGET_H[key] ?? 1, actor = new Actor(key, h), root = new THREE.Group(), d = () => new THREE.Group();
+  root.add(actor.root);
+  const stack = new THREE.Group(); stack.position.set(0, h * 0.55, -0.28); root.add(stack);
+  const lantern = new THREE.Group(); lantern.position.set(-0.28, h * 0.45, 0.1); root.add(lantern);
+  actor.play(actor.has('idle') ? 'idle' : 'walk');
+  return { root, body: d(), legL: d(), legR: d(), armR: d(), tool: d(), stack, lantern, height: h, actor };
+}
 import { sfx } from '../platform/audio';
 
 const U = 1 / CELL;
@@ -68,7 +85,7 @@ class Overlay {
   free(el: HTMLDivElement) { el.remove(); this.pool.push(el); }
 }
 
-interface CharV { rig: Rig; yaw: number; lx: number; ly: number; tool: string; stackSig: string; bubble?: HTMLDivElement; bubbleText?: string; kind: string }
+interface CharV { rig: ActorRig; ver?: number; yaw: number; lx: number; ly: number; tool: string; stackSig: string; bubble?: HTMLDivElement; bubbleText?: string; kind: string }
 interface BV { root: THREE.Group; parts: Record<string, THREE.Object3D>; sig: string; pads: THREE.Group; top: number; label?: HTMLDivElement; labelText?: string; bars?: HTMLDivElement; pileIn: THREE.Group; pileOut: THREE.Group; pileSig: string; pop: number; smokeT: number }
 interface EV { group: THREE.Group; mats: THREE.MeshLambertMaterial[]; yaw: number; lx: number; ly: number; hp?: HTMLDivElement }
 interface Flyer { obj: THREE.Object3D; fx: number; fy: number; fz: number; to: () => { x: number; y: number; z: number }; t: number; dur: number; h: number; owner?: string }
@@ -80,6 +97,7 @@ export class View {
   groundCv = document.createElement('canvas'); groundTex: THREE.CanvasTexture; groundSig = '';
   hedge!: THREE.InstancedMesh;
   plinthMat = new THREE.MeshLambertMaterial({ color: 0x3a3631 }); rimMat = new THREE.LineBasicMaterial({ color: 0x8a7348, transparent: true, opacity: 0.5 });
+  assetsVer = 0;
   zoom = 1; offers = new Map<number, { root: THREE.Group; fill: THREE.Mesh; label: HTMLDivElement; sig: string }>(); visitors = new Map<number, CharV>(); till = new THREE.Group(); tillN = -1;
   hero: CharV; cats = new Map<number, CharV>(); units = new Map<number, CharV>(); enemies = new Map<number, EV>();
   nodes = new Map<number, { obj: THREE.Group; alive: boolean; kind: string }>();
@@ -122,9 +140,9 @@ export class View {
     const under = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), new THREE.MeshBasicMaterial({ color: 0x0e0f0e })); under.rotation.x = -Math.PI / 2; under.position.set(W * U / 2, -0.05, H * U / 2); this.scene.add(under);
     this.drawGround(); this.makeProps();
 
-    this.hero = { rig: heroRig(), yaw: 0, lx: 0, ly: 0, tool: 'axe', stackSig: '', kind: 'hero' };
-    this.hero.rig.root.scale.setScalar(0.8); // shorter, closer to the cats
+    this.hero = this.makeHero();
     this.scene.add(this.hero.rig.root);
+    loadAssets(() => { this.assetsVer++; });
     this.scene.add(this.till);
     const soft = dotTexture(true), hard = dotTexture(false);
     this.spark = new Particles(this.scene, 500, 0.16, true, soft); this.chip = new Particles(this.scene, 500, 0.13, false, hard); this.smoke = new Particles(this.scene, 160, 1.1, false, soft);
@@ -243,7 +261,7 @@ export class View {
 
   // ---------------------------------------------------------------- buildings
   private palMask(b: Building, pal: Set<string>) { return (pal.has((b.x + CELL) + ',' + b.y) ? 1 : 0) | (pal.has(b.x + ',' + (b.y + CELL)) ? 2 : 0); }
-  private bSig(b: Building, pal: Set<string>) { return b.site ? 'site' + (BUILD[b.type].fp || 1) : b.type + b.level + (b.type === 'palisade' ? '|' + this.palMask(b, pal) + (b.hp <= 0 ? 'x' : '') : ''); }
+  private bSig(b: Building, pal: Set<string>) { return (BUILD_KEY[b.type] && hasAsset(BUILD_KEY[b.type]!) ? 'g' : '') + (b.type === 'shop' && hasAsset('owl') ? 'o' : '') + (b.site ? 'site' + (BUILD[b.type].fp || 1) : b.type + b.level + (b.type === 'palisade' ? '|' + this.palMask(b, pal) + (b.hp <= 0 ? 'x' : '') : '')); }
   dropB(id: string) { const v = this.buildings.get(id); if (!v) return; this.scene.remove(v.root); if (v.label) this.ov.free(v.label); if (v.bars) this.ov.free(v.bars); this.buildings.delete(id); }
   syncBuildings(dt: number) {
     const w = this.w, t = this.elapsed;
@@ -254,7 +272,10 @@ export class View {
       if (!v || v.sig !== sig) {
         const fresh = !v, wasSite = v?.sig.startsWith('site');
         if (v) { this.scene.remove(v.root); }
-        const m = b.site ? buildingModel('site', 1, def.fp) : buildingModel(b.type, b.level, def.fp, b.type === 'palisade' ? this.palMask(b, pal) : 0, b.hp <= 0);
+        const gk = BUILD_KEY[b.type], gm = !b.site && gk ? staticModel(gk, (def.fp || 1) * (b.type === 'hall' ? 0.9 + b.level * 0.05 : 0.95)) : null;
+        const m = gm ? { group: gm, parts: {} as Record<string, THREE.Object3D> } : b.site ? buildingModel('site', 1, def.fp) : buildingModel(b.type, b.level, def.fp, b.type === 'palisade' ? this.palMask(b, pal) : 0, b.hp <= 0);
+        if (b.type === 'shop' && gm && hasAsset('owl')) { const a = new Actor('owl', 0.75); a.root.position.set(0, 0.8, -0.35); m.group.add(a.root); m.parts.owl = a.root; }
+        else if (b.type === 'shop' && m.parts.owl && hasAsset('owl')) { const o = m.parts.owl, a = new Actor('owl', TARGET_H.owl); a.root.position.copy(o.position); o.parent!.add(a.root); o.parent!.remove(o); m.parts.owl = a.root; }
         const root = new THREE.Group(); root.add(m.group);
         // stone plinth the exact size of the footprint, so every building shows how many cells it takes
         const fpN = def.fp || 1;
@@ -311,9 +332,23 @@ export class View {
   }
 
   // ---------------------------------------------------------------- characters
+  private makeHero(): CharV {
+    const rig = mkRig('hero', heroRig); if (!rig.actor) rig.root.scale.setScalar(0.8); // the procedural hero is a bit tall
+    return { rig, yaw: 0, lx: 0, ly: 0, tool: 'axe', stackSig: '', kind: 'hero', ver: this.assetsVer };
+  }
   private animRig(v: CharV, e: { x: number; y: number; face: number; moving: boolean; walkT: number; swing: number }, vx: number, vy: number, dt: number, scale = 1) {
     const r = v.rig, t = this.elapsed;
     r.root.position.set(e.x * U, 0, e.y * U);
+    if (r.actor) {
+      const sp0 = Math.hypot(vx, vy); let y0 = v.yaw;
+      if (sp0 > 8) y0 = Math.atan2(vx, vy); else if (e.swing > 0) y0 = e.face > 0 ? Math.PI / 2 : -Math.PI / 2;
+      v.yaw = angLerp(v.yaw, y0, Math.min(1, dt * 12)); r.root.rotation.y = v.yaw;
+      const a = r.actor;
+      if (e.swing > 0 && a.has('chop')) { a.play('chop', 0.08); a.speed(1.6); }
+      else if (e.moving) { const run = sp0 > 200 && a.has('run'); a.play(run ? 'run' : 'walk'); a.speed(Math.max(0.6, sp0 / (run ? 260 : 150))); }
+      else if (a.has('idle')) { a.play('idle'); a.speed(1); } else { a.play('walk'); a.speed(0); }
+      a.update(dt); return;
+    }
     const sp = Math.hypot(vx, vy);
     let yaw = v.yaw;
     if (sp > 8) yaw = Math.atan2(vx, vy); else if (e.swing > 0) yaw = e.face > 0 ? Math.PI / 2 : -Math.PI / 2;
@@ -344,6 +379,7 @@ export class View {
   syncChars(dt: number) {
     const w = this.w, h = w.hero, t = this.elapsed;
     // hero
+    if (this.hero.ver !== this.assetsVer && hasAsset('hero') && !this.hero.rig.actor) { this.scene.remove(this.hero.rig.root); this.hero = this.makeHero(); this.scene.add(this.hero.rig.root); }
     const hv = this.hero;
     this.animRig(hv, h, h.vx, h.vy, dt);
     hv.rig.root.visible = !(h.dead > 0 && h.dead < 2.6) && !(h.inv > 0 && Math.floor(t * 20) % 2);
@@ -356,7 +392,7 @@ export class View {
       seen.add(c.id);
       let v = this.cats.get(c.id);
       const home = w.buildings[c.home], kind = home?.type === 'houseQuarry' ? 'miner' : home?.type === 'houseForager' ? 'forager' : c.role;
-      if (!v || v.kind !== kind) { if (v) this.scene.remove(v.rig.root); v = { rig: catRig(kind), yaw: 0, lx: c.x, ly: c.y, tool: '', stackSig: '', kind }; this.scene.add(v.rig.root); this.cats.set(c.id, v); }
+      if (!v || v.kind !== kind || (v.ver !== this.assetsVer && !v.rig.actor && hasAsset('cat'))) { if (v) { this.scene.remove(v.rig.root); this.bubble(v, null); } v = { rig: mkRig(kind, () => catRig(kind)), yaw: 0, lx: c.x, ly: c.y, tool: '', stackSig: '', kind, ver: this.assetsVer }; this.scene.add(v.rig.root); this.cats.set(c.id, v); }
       const tk = c.role === 'gatherer' ? (home?.gather === 'stone' ? 'pick' : home?.gather === 'berry' ? 'basket' : 'catAxe') : c.role === 'master' ? 'hammer' : '';
       if (tk !== v.tool) { v.tool = tk; v.rig.tool.clear(); if (tk) v.rig.tool.add(toolModel(tk)); }
       const vx = (c.x - v.lx) / Math.max(dt, 1e-3), vy = (c.y - v.ly) / Math.max(dt, 1e-3); v.lx = c.x; v.ly = c.y;
@@ -372,7 +408,7 @@ export class View {
     for (const u of w.units) {
       useen.add(u.id);
       let v = this.units.get(u.id);
-      if (!v) { v = { rig: catRig(u.kind), yaw: 0, lx: u.x, ly: u.y, tool: u.kind, stackSig: '', kind: u.kind }; v.rig.tool.add(toolModel(u.kind)); this.scene.add(v.rig.root); this.units.set(u.id, v); }
+      if (!v || (v.ver !== this.assetsVer && !v.rig.actor && hasAsset('guard'))) { if (v) { this.scene.remove(v.rig.root); this.bubble(v, null); } v = { rig: mkRig(u.kind, () => catRig(u.kind)), yaw: 0, lx: u.x, ly: u.y, tool: u.kind, stackSig: '', kind: u.kind, ver: this.assetsVer }; v.rig.tool.add(toolModel(u.kind)); this.scene.add(v.rig.root); this.units.set(u.id, v); }
       const vx = (u.x - v.lx) / Math.max(dt, 1e-3), vy = (u.y - v.ly) / Math.max(dt, 1e-3); v.lx = u.x; v.ly = u.y;
       this.animRig(v, u, u.moving ? vx : 0, u.moving ? vy : 0, dt, 0.6);
       v.rig.root.visible = !(u.woundT > 0 && Math.floor(t * 4) % 2);
@@ -387,8 +423,8 @@ export class View {
       seen.add(e.id);
       let v = this.enemies.get(e.id);
       if (!v) {
-        const group = new THREE.Group(), m = enemyModel(e.kind), mats: THREE.MeshLambertMaterial[] = [];
-        m.traverse(o => { const mesh = o as THREE.Mesh; if (mesh.isMesh && mesh.name === 'body') { const mt = MAT.body.clone(); if (e.kind === 'shade') { mt.transparent = true; mt.opacity = 0.75; } mesh.material = mt; mats.push(mt); } });
+        const glb = hasAsset(e.kind), group = new THREE.Group(), m = glb ? new Actor(e.kind, TARGET_H[e.kind] ?? 1).root : enemyModel(e.kind), mats: any[] = [];
+        m.traverse(o => { const mesh = o as THREE.Mesh; if (mesh.isMesh && (glb || mesh.name === 'body')) { const mt = (glb ? (mesh.material as THREE.Material) : MAT.body).clone() as any; if (e.kind === 'shade') { mt.transparent = true; mt.opacity = 0.75; } mesh.material = mt; if (mt.emissive) mats.push(mt); } });
         group.add(m); this.scene.add(group); v = { group, mats, yaw: 0, lx: e.x, ly: e.y }; this.enemies.set(e.id, v);
       }
       const vx = (e.x - v.lx) / Math.max(dt, 1e-3), vy = (e.y - v.ly) / Math.max(dt, 1e-3); v.lx = e.x; v.ly = e.y;
@@ -452,7 +488,7 @@ export class View {
     for (const c of w.visitors) {
       vs.add(c.id);
       let v = this.visitors.get(c.id);
-      if (!v) { v = { rig: catRig('visitor' + c.look), yaw: 0, lx: c.x, ly: c.y, tool: '', stackSig: '', kind: 'visitor' }; this.scene.add(v.rig.root); this.visitors.set(c.id, v); }
+      if (!v) { v = { rig: mkRig('visitor', () => catRig('visitor' + c.look)), yaw: 0, lx: c.x, ly: c.y, tool: '', stackSig: '', kind: 'visitor' }; this.scene.add(v.rig.root); this.visitors.set(c.id, v); }
       const vx = (c.x - v.lx) / Math.max(dt, 1e-3), vy = (c.y - v.ly) / Math.max(dt, 1e-3); v.lx = c.x; v.ly = c.y;
       this.animRig(v, { ...c, swing: 0 }, c.moving ? vx : 0, c.moving ? vy : 0, dt, 0.6);
       if (!c.moving && c.state === 'wait') v.yaw = angLerp(v.yaw, Math.PI, Math.min(1, dt * 6));
@@ -687,10 +723,12 @@ export class View {
   // ---------------------------------------------------------------- icons for the HTML UI
   private thumbR: THREE.WebGLRenderer | null = null; private thumbS: THREE.Scene | null = null; private thumbs = new Map<string, string>();
   thumb(key: string, maxH = 64): string {
-    const ck = key + '@' + maxH, hit = this.thumbs.get(ck); if (hit !== undefined) return hit;
+    const ck = key + '@' + maxH + '#' + this.assetsVer, hit = this.thumbs.get(ck); if (hit !== undefined) return hit;
     let obj: THREE.Object3D | null = null;
     const [kind, id] = key.split(':');
-    if (kind === 'b') obj = buildingModel(id as BuildingType, 1, BUILD[id as BuildingType]?.fp || 1, id === 'palisade' ? 1 : 0).group;
+    const gk = kind === 'b' ? BUILD_KEY[id as BuildingType] : kind === 'u' ? 'guard' : kind === 'hero' ? 'hero' : undefined;
+    if (gk && hasAsset(gk)) obj = kind === 'b' ? staticModel(gk, BUILD[id as BuildingType]?.fp || 1) : new Actor(gk, TARGET_H[gk] ?? 1).root;
+    else if (kind === 'b') obj = buildingModel(id as BuildingType, 1, BUILD[id as BuildingType]?.fp || 1, id === 'palisade' ? 1 : 0).group;
     else if (kind === 'i') obj = itemModel(id as ItemId | 'coin');
     else if (kind === 'u') obj = catRig(id).root;
     else if (kind === 'hero') obj = heroRig().root;
