@@ -26,7 +26,7 @@ describe('placement', () => {
   });
   it('places a site, takes coins, completes when materials arrive', () => {
     const w = createWorld(); town(w); w.coins = 100;
-    const fp = at('forge', 4, 2); const b = place(w, 'forge', fp.x, fp.y)!;
+    const fp = at('forge', 5, 2); const b = place(w, 'forge', fp.x, fp.y)!;
     expect(b.site).toEqual({ plank: 6 });
     expect(w.coins).toBe(65);
     firstOf(w, 'storage')!.store.plank = 10;
@@ -94,6 +94,23 @@ describe('ad loops', () => {
     expect(v.state).toBe('leave');
     expect(w.till).toBe(0);
     expect(w.coins).toBeGreaterThan(coins + 4);
+  });
+});
+
+describe('selling', () => {
+  it('the Owl always buys what no waiting customer wants', () => {
+    const w = createWorld(); w.offers = []; w.visitT = 999;
+    w.visitors.push({ id: 999, x: 0, y: 0, face: 1, walkT: 0, moving: false, look: 0, want: 'stone', n: 3, total: 3, state: 'wait', patience: 80, maxPatience: 80, got: 0 });
+    const shop = w.buildings.shop; w.hero.x = shop.x; w.hero.y = shop.y + 96; w.hero.stack = Array(8).fill('log');
+    const coins = w.coins;
+    for (let i = 0; i < 30 * 3; i++) { step(w, { x: 0, y: 0 }, 1 / 30); w.events.length = 0; }
+    expect(w.hero.stack).toHaveLength(0);
+    expect(w.coins).toBe(coins + 8);
+  });
+  it('big buildings keep a lane between them', () => {
+    const w = createWorld(); done(w, 'houseGatherer', -6, -6);
+    const p = at('houseGatherer', -4, -6); expect(gridCheck(w, 'houseGatherer', p.x, p.y)).toMatch(/прохід між/);
+    const q = at('houseGatherer', -3, -6); expect(gridCheck(w, 'houseGatherer', q.x, q.y)).toBeNull();
   });
 });
 

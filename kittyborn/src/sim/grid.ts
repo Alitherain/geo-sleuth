@@ -99,6 +99,12 @@ export function gridCheck(w: World, type: BuildingType, x0: number, y0: number, 
     if (u) return u.kind === 'pad' ? `Тут прохід до «${BUILD[w.buildings[u.id]?.type ?? type].name}»` : 'Заважає будівля';
     if (isRoad(i, j) && type !== 'palisade') return 'Дорога: тут не будують';
   }
+  // big buildings keep a one-cell lane around them, so the town never turns into a maze
+  if (f >= 2 && !WALKABLE(type)) for (let a = -1; a <= f; a++) for (let c = -1; c <= f; c++) {
+    if (a >= 0 && a < f && c >= 0 && c < f) continue;
+    const u = occ.get(key(o.i + a, o.j + c));
+    if (u && u.kind === 'fp' && !u.walk && (BUILD[w.buildings[u.id]?.type]?.fp || 1) >= 2) return 'Залиш прохід між будівлями';
+  }
   for (const [i, j] of padRow(type, x, y)) { const u = occ.get(key(i, j)); if (u && !u.walk) return 'Перед будівлею має бути вільний ряд'; if (u && u.kind === 'pad') return 'Майданчики налазять один на одного'; }
   for (const n of w.nodes) if (n.alive && Math.abs(n.x - x) < f * CELL / 2 + 12 && Math.abs(n.y - y) < f * CELL / 2 + 12) return 'Заважає дерево чи камінь';
   if (!WALKABLE(type)) {

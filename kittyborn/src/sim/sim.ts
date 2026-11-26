@@ -3,7 +3,7 @@ import { collide } from './physics';
 import { harvestNode, updateCats } from './logistics';
 import { addFuel, barracksTick, deliverToSite, production, sell } from './economy';
 import { damageEnemy, updateClock, updateUnits } from './night';
-import { frontVisitor, offerAt, payOffer, serveOne, takeTill, updateOffers, updateVisitors } from './town';
+import { servableVisitor, offerAt, payOffer, serveOne, takeTill, updateOffers, updateVisitors } from './town';
 import { available, dist, heroCap, heroDmg, heroMaxHp, heroSpeed, heroSwing, invAdd, invGet, nodeOpen, procStats, storageFree, type Building, type World } from './world';
 
 export interface Input { x: number; y: number }
@@ -14,7 +14,7 @@ export function heroSlot(w: World): Slot {
   const h = w.hero;
   for (const b of Object.values(w.buildings)) {
     if (b.site) { if (dist(h.x, h.y, b.x, b.y) < BUILD[b.type].r + 34) return { slot: 'site', b }; continue; }
-    for (const s of BUILD[b.type].slots || []) if (Math.abs(h.x - (b.x + s.dx)) < 30 && Math.abs(h.y - (b.y + s.dy)) < 26) return { slot: s.kind, b };
+    for (const s of BUILD[b.type].slots || []) if (Math.abs(h.x - (b.x + s.dx)) < 36 && Math.abs(h.y - (b.y + s.dy)) < 34) return { slot: s.kind, b };
   }
   return null;
 }
@@ -96,12 +96,11 @@ function heroUpdate(w: World, input: Input, dt: number) {
   const takeOf = (k: ItemId) => { const i = h.stack.lastIndexOf(k); if (i < 0) return false; h.stack.splice(i, 1); return true; };
   switch (s.slot) {
     case 'sell': {
-      const v = frontVisitor(w);
-      if (v && takeOf(v.want)) { serveOne(w, v); transferT = 0.08; break; }   // customers first
-      if (w.till > 0) { takeTill(w); transferT = 0.05; break; }              // then the till on the counter
-      const keep = new Set(w.visitors.filter(x => x.state !== 'leave').map(x => x.want));
-      const i = h.stack.map((k, j) => [k, j] as const).reverse().find(([k]) => !keep.has(k))?.[1];
-      if (i !== undefined) { const k = h.stack.splice(i, 1)[0]; toward(k, b.x, b.y); sell(w, k, 1, b.x + (Math.random() - 0.5) * 50, b.y - 60); transferT = 0.06; }
+      // order: customers who wait for something in the bag, then the till, then everything else to the Owl
+      const v = servableVisitor(w);
+      if (v && takeOf(v.want)) { serveOne(w, v); transferT = 0.08; break; }
+      if (w.till > 0) { takeTill(w); transferT = 0.05; break; }
+      if (top) { h.stack.pop(); toward(top, b.x, b.y); sell(w, top, 1, b.x + (Math.random() - 0.5) * 50, b.y - 60); transferT = 0.06; }
       break;
     }
     case 'deposit': if (top && storageFree(b) > 0) { h.stack.pop(); toward(top, b.x, b.y); invAdd(b.store, top, 1); w.events.push({ t: 'drop', x: b.x, y: b.y }); transferT = 0.05; } break;

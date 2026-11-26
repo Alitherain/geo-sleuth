@@ -244,6 +244,7 @@ function master(w: World, c: Cat, dt: number) {
 // ---------------------------------------------------------------- shared actions (hero uses them too)
 export function harvestNode(w: World, n: ResNode, by: Cat | 'hero', dmg = 1) {
   n.hp -= dmg; n.shake = 1;
+  if (by === 'hero') w.flags['got_' + n.item] = true;
   w.events.push({ t: n.kind === 'rock' ? 'mine' : 'chop', x: n.x, y: n.y, kind: by === 'hero' ? 'hero' : 'cat' });
   if (n.hp > 0) return;
   n.alive = false; n.claimedBy = 0;

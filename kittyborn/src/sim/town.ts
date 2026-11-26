@@ -22,7 +22,12 @@ function nextOffer(w: World): Offer | null {
     if (count(w, t) >= n || buildLock(w, t)) continue;
     const spots = validSpots(w, t); if (!spots.length) continue;
     const anchor = w.buildings.heart ?? { x: TC.x, y: TC.y };
-    spots.sort((a, b) => dist(a.x, a.y, anchor.x, anchor.y) - dist(b.x, b.y, anchor.x, anchor.y));
+    if (BUILD[t].fuel || t === 'tower') {
+      // lights and towers spread out: far from other lights, still close to the town
+      const others = Object.values(w.buildings).filter(b => BUILD[b.type].fuel || b.type === 'tower');
+      const score = (p: { x: number; y: number }) => Math.min(400, ...others.map(b => dist(p.x, p.y, b.x, b.y))) - 0.35 * dist(p.x, p.y, TC.x, TC.y);
+      spots.sort((a, b) => score(b) - score(a));
+    } else spots.sort((a, b) => dist(a.x, a.y, anchor.x, anchor.y) - dist(b.x, b.y, anchor.x, anchor.y));
     return { id: w.nextId++, type: t, x: spots[0].x, y: spots[0].y, paid: 0 };
   }
   return null;
@@ -65,10 +70,12 @@ const shopPad = (w: World) => { const s = w.buildings.shop; if (!s) return null;
 const queueSpot = (w: World, i: number) => { const p = shopPad(w)!; return { x: p.x + (i % 2 ? 18 : -14), y: p.y + 44 + i * 50 }; };
 const spawnAt = (w: World) => ({ x: TC.x + (Math.random() - 0.5) * 60, y: TC.y + (townHalf(w) + 3) * CELL });
 function wantFor(w: World): [ItemId, number] {
-  const pool: [ItemId, number, number][] = [['log', 3, 7], ['berry', 2, 5], ['stone', 2, 4]];
-  if (has(w, 'sawmill')) pool.push(['plank', 2, 6], ['plank', 2, 5]);
+  const pool: [ItemId, number, number][] = [['log', 3, 6], ['log', 3, 6]];
+  if (w.flags.got_berry || has(w, 'houseForager')) pool.push(['berry', 2, 4]);
+  if (w.flags.got_stone || has(w, 'houseQuarry')) pool.push(['stone', 2, 4]);
+  if (has(w, 'sawmill')) pool.push(['plank', 2, 5], ['plank', 2, 5]);
   if (has(w, 'candleShop')) pool.push(['candle', 1, 3]);
-  if (w.flags.hedge) pool.push(['lav', 2, 4]);
+  if (w.flags.got_lav) pool.push(['lav', 2, 4]);
   const [k, a, b] = pool[Math.floor(Math.random() * pool.length)];
   return [k, a + Math.floor(Math.random() * (b - a + 1))];
 }
@@ -79,6 +86,7 @@ export function updateVisitors(w: World, dt: number) {
     if (w.visitT <= 0 && w.visitors.filter(v => v.state !== 'leave').length < 4) {
       w.visitT = 16 + Math.random() * 12;
       const [want, n] = wantFor(w), at = spawnAt(w);
+      if (!w.flags.metCustomer) { w.flags.metCustomer = true; w.events.push({ t: 'toast', title: 'Покупці', body: 'Над котом видно, що він хоче. Принеси це в рюкзаку і стань на «Продати»: заплатить удвічі, монети ляжуть на прилавок.' }); }
       w.visitors.push({ id: w.nextId++, x: at.x, y: at.y, face: 1, walkT: 0, moving: false, look: Math.floor(Math.random() * 4), want, n, total: n, state: 'come', patience: 80, maxPatience: 80, got: 0 });
     }
   }
@@ -87,7 +95,7 @@ export function updateVisitors(w: World, dt: number) {
     if (!day || !w.buildings.shop) { v.state = 'leave'; return; }
     const q = queueSpot(w, i);
     if (walkTo(w, v as any, q.x, q.y, 105, dt, 6)) { v.state = 'wait'; v.moving = false; v.face = -1; }
-    if (v.state === 'wait') { v.patience -= dt * (i === 0 ? 1 : 0.6); if (v.patience <= 0) { v.state = 'leave'; w.events.push({ t: 'bubble', who: v.id, s: 'Піду деінде.' }); } }
+    if (v.state === 'wait') { v.patience -= dt * (i === 0 ? 1 : 0.6); if (v.patience <= 0) { v.state = 'leave'; w.events.push({ t: 'bubble', who: v.id, s: `Не дочекався: ${ITEMS[v.want].name.toLowerCase()}.` }); } }
   });
   for (let i = w.visitors.length - 1; i >= 0; i--) {
     const v = w.visitors[i]; if (v.state !== 'leave') continue;
@@ -95,10 +103,9 @@ export function updateVisitors(w: World, dt: number) {
     if (walkTo(w, v as any, s.x, s.y + 40, 120, dt, 10)) w.visitors.splice(i, 1);
   }
 }
-/** Front customer waiting at the counter. */
-export function frontVisitor(w: World): Visitor | undefined {
-  const v = w.visitors.find(x => x.state !== 'leave');
-  return v && v.state === 'wait' ? v : undefined;
+/** A waiting customer the hero can serve right now (front of the line first). */
+export function servableVisitor(w: World): Visitor | undefined {
+  return w.visitors.find(v => v.state === 'wait' && w.hero.stack.includes(v.want));
 }
 /** Hand one item to the front customer; when the order is complete they pay into the till. */
 export function serveOne(w: World, v: Visitor) {

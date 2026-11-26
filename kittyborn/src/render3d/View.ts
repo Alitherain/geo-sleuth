@@ -78,6 +78,7 @@ export class View {
   hemi: THREE.HemisphereLight; sun: THREE.DirectionalLight; fires: THREE.PointLight[] = []; heroLight: THREE.PointLight;
   groundCv = document.createElement('canvas'); groundTex: THREE.CanvasTexture; groundSig = '';
   hedge!: THREE.InstancedMesh;
+  plinthMat = new THREE.MeshLambertMaterial({ color: 0x3a3631 }); rimMat = new THREE.LineBasicMaterial({ color: 0x8a7348, transparent: true, opacity: 0.5 });
   zoom = 1; offers = new Map<number, { root: THREE.Group; fill: THREE.Mesh; label: HTMLDivElement; sig: string }>(); visitors = new Map<number, CharV>(); till = new THREE.Group(); tillN = -1;
   hero: CharV; cats = new Map<number, CharV>(); units = new Map<number, CharV>(); enemies = new Map<number, EV>();
   nodes = new Map<number, { obj: THREE.Group; alive: boolean; kind: string }>();
@@ -121,6 +122,7 @@ export class View {
     this.drawGround(); this.makeProps();
 
     this.hero = { rig: heroRig(), yaw: 0, lx: 0, ly: 0, tool: 'axe', stackSig: '', kind: 'hero' };
+    this.hero.rig.root.scale.setScalar(0.8); // shorter, closer to the cats
     this.scene.add(this.hero.rig.root);
     this.scene.add(this.till);
     const soft = dotTexture(true), hard = dotTexture(false);
@@ -253,6 +255,9 @@ export class View {
         if (v) { this.scene.remove(v.root); }
         const m = b.site ? buildingModel('site', 1, def.fp) : buildingModel(b.type, b.level, def.fp, b.type === 'palisade' ? this.palMask(b, pal) : 0, b.hp <= 0);
         const root = new THREE.Group(); root.add(m.group);
+        // stone plinth the exact size of the footprint, so every building shows how many cells it takes
+        const fpN = def.fp || 1;
+        if (fpN >= 2 || b.site) { const pl = new THREE.Mesh(new THREE.BoxGeometry(fpN - 0.08, 0.1, fpN - 0.08), this.plinthMat); pl.position.y = 0.05; pl.receiveShadow = true; root.add(pl); const rim = new THREE.LineSegments(new THREE.EdgesGeometry(pl.geometry), this.rimMat); rim.position.y = 0.05; root.add(rim); }
         const pads = new THREE.Group(); root.add(pads);
         for (const s of def.slots || []) {
           const plate = new THREE.Mesh(new THREE.BoxGeometry(0.86, 0.05, 0.86), new THREE.MeshLambertMaterial({ color: 0x1e1a17 }));
